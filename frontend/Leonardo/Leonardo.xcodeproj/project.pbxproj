@@ -1,0 +1,556 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		9EFEAABA2DDF3C87008BE0D0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9EFEAAA32DDF3C85008BE0D0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9EFEAAAA2DDF3C85008BE0D0;
+			remoteInfo = Leonardo;
+		};
+		9EFEAAC42DDF3C87008BE0D0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9EFEAAA32DDF3C85008BE0D0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9EFEAAAA2DDF3C85008BE0D0;
+			remoteInfo = Leonardo;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		9EFEAAAB2DDF3C85008BE0D0 /* Leonardo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Leonardo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9EFEAAB92DDF3C87008BE0D0 /* LeonardoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LeonardoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9EFEAAC32DDF3C87008BE0D0 /* LeonardoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LeonardoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		9EFEAAAD2DDF3C85008BE0D0 /* Leonardo */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Leonardo;
+			sourceTree = "<group>";
+		};
+		9EFEAABC2DDF3C87008BE0D0 /* LeonardoTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LeonardoTests;
+			sourceTree = "<group>";
+		};
+		9EFEAAC62DDF3C87008BE0D0 /* LeonardoUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LeonardoUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9EFEAAA82DDF3C85008BE0D0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9EFEAAB62DDF3C87008BE0D0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9EFEAAC02DDF3C87008BE0D0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		9EFEAAA22DDF3C85008BE0D0 = {
+			isa = PBXGroup;
+			children = (
+				9EFEAAAD2DDF3C85008BE0D0 /* Leonardo */,
+				9EFEAABC2DDF3C87008BE0D0 /* LeonardoTests */,
+				9EFEAAC62DDF3C87008BE0D0 /* LeonardoUITests */,
+				9EFEAAAC2DDF3C85008BE0D0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9EFEAAAC2DDF3C85008BE0D0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9EFEAAAB2DDF3C85008BE0D0 /* Leonardo.app */,
+				9EFEAAB92DDF3C87008BE0D0 /* LeonardoTests.xctest */,
+				9EFEAAC32DDF3C87008BE0D0 /* LeonardoUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9EFEAAAA2DDF3C85008BE0D0 /* Leonardo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9EFEAACD2DDF3C87008BE0D0 /* Build configuration list for PBXNativeTarget "Leonardo" */;
+			buildPhases = (
+				9EFEAAA72DDF3C85008BE0D0 /* Sources */,
+				9EFEAAA82DDF3C85008BE0D0 /* Frameworks */,
+				9EFEAAA92DDF3C85008BE0D0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				9EFEAAAD2DDF3C85008BE0D0 /* Leonardo */,
+			);
+			name = Leonardo;
+			packageProductDependencies = (
+			);
+			productName = Leonardo;
+			productReference = 9EFEAAAB2DDF3C85008BE0D0 /* Leonardo.app */;
+			productType = "com.apple.product-type.application";
+		};
+		9EFEAAB82DDF3C87008BE0D0 /* LeonardoTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9EFEAAD02DDF3C87008BE0D0 /* Build configuration list for PBXNativeTarget "LeonardoTests" */;
+			buildPhases = (
+				9EFEAAB52DDF3C87008BE0D0 /* Sources */,
+				9EFEAAB62DDF3C87008BE0D0 /* Frameworks */,
+				9EFEAAB72DDF3C87008BE0D0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9EFEAABB2DDF3C87008BE0D0 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				9EFEAABC2DDF3C87008BE0D0 /* LeonardoTests */,
+			);
+			name = LeonardoTests;
+			packageProductDependencies = (
+			);
+			productName = LeonardoTests;
+			productReference = 9EFEAAB92DDF3C87008BE0D0 /* LeonardoTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		9EFEAAC22DDF3C87008BE0D0 /* LeonardoUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9EFEAAD32DDF3C87008BE0D0 /* Build configuration list for PBXNativeTarget "LeonardoUITests" */;
+			buildPhases = (
+				9EFEAABF2DDF3C87008BE0D0 /* Sources */,
+				9EFEAAC02DDF3C87008BE0D0 /* Frameworks */,
+				9EFEAAC12DDF3C87008BE0D0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9EFEAAC52DDF3C87008BE0D0 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				9EFEAAC62DDF3C87008BE0D0 /* LeonardoUITests */,
+			);
+			name = LeonardoUITests;
+			packageProductDependencies = (
+			);
+			productName = LeonardoUITests;
+			productReference = 9EFEAAC32DDF3C87008BE0D0 /* LeonardoUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9EFEAAA32DDF3C85008BE0D0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1630;
+				LastUpgradeCheck = 1630;
+				TargetAttributes = {
+					9EFEAAAA2DDF3C85008BE0D0 = {
+						CreatedOnToolsVersion = 16.3;
+					};
+					9EFEAAB82DDF3C87008BE0D0 = {
+						CreatedOnToolsVersion = 16.3;
+						TestTargetID = 9EFEAAAA2DDF3C85008BE0D0;
+					};
+					9EFEAAC22DDF3C87008BE0D0 = {
+						CreatedOnToolsVersion = 16.3;
+						TestTargetID = 9EFEAAAA2DDF3C85008BE0D0;
+					};
+				};
+			};
+			buildConfigurationList = 9EFEAAA62DDF3C85008BE0D0 /* Build configuration list for PBXProject "Leonardo" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 9EFEAAA22DDF3C85008BE0D0;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 9EFEAAAC2DDF3C85008BE0D0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9EFEAAAA2DDF3C85008BE0D0 /* Leonardo */,
+				9EFEAAB82DDF3C87008BE0D0 /* LeonardoTests */,
+				9EFEAAC22DDF3C87008BE0D0 /* LeonardoUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		9EFEAAA92DDF3C85008BE0D0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9EFEAAB72DDF3C87008BE0D0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9EFEAAC12DDF3C87008BE0D0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		9EFEAAA72DDF3C85008BE0D0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9EFEAAB52DDF3C87008BE0D0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9EFEAABF2DDF3C87008BE0D0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9EFEAABB2DDF3C87008BE0D0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9EFEAAAA2DDF3C85008BE0D0 /* Leonardo */;
+			targetProxy = 9EFEAABA2DDF3C87008BE0D0 /* PBXContainerItemProxy */;
+		};
+		9EFEAAC52DDF3C87008BE0D0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9EFEAAAA2DDF3C85008BE0D0 /* Leonardo */;
+			targetProxy = 9EFEAAC42DDF3C87008BE0D0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		9EFEAACB2DDF3C87008BE0D0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = C6NFMH3NZX;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.4;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		9EFEAACC2DDF3C87008BE0D0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = C6NFMH3NZX;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.4;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		9EFEAACE2DDF3C87008BE0D0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Leonardo/Leonardo.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C6NFMH3NZX;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = river.Leonardo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		9EFEAACF2DDF3C87008BE0D0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Leonardo/Leonardo.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C6NFMH3NZX;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = river.Leonardo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		9EFEAAD12DDF3C87008BE0D0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C6NFMH3NZX;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = river.LeonardoTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Leonardo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Leonardo";
+			};
+			name = Debug;
+		};
+		9EFEAAD22DDF3C87008BE0D0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C6NFMH3NZX;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = river.LeonardoTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Leonardo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Leonardo";
+			};
+			name = Release;
+		};
+		9EFEAAD42DDF3C87008BE0D0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C6NFMH3NZX;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = river.LeonardoUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Leonardo;
+			};
+			name = Debug;
+		};
+		9EFEAAD52DDF3C87008BE0D0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C6NFMH3NZX;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = river.LeonardoUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Leonardo;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		9EFEAAA62DDF3C85008BE0D0 /* Build configuration list for PBXProject "Leonardo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9EFEAACB2DDF3C87008BE0D0 /* Debug */,
+				9EFEAACC2DDF3C87008BE0D0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9EFEAACD2DDF3C87008BE0D0 /* Build configuration list for PBXNativeTarget "Leonardo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9EFEAACE2DDF3C87008BE0D0 /* Debug */,
+				9EFEAACF2DDF3C87008BE0D0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9EFEAAD02DDF3C87008BE0D0 /* Build configuration list for PBXNativeTarget "LeonardoTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9EFEAAD12DDF3C87008BE0D0 /* Debug */,
+				9EFEAAD22DDF3C87008BE0D0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9EFEAAD32DDF3C87008BE0D0 /* Build configuration list for PBXNativeTarget "LeonardoUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9EFEAAD42DDF3C87008BE0D0 /* Debug */,
+				9EFEAAD52DDF3C87008BE0D0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9EFEAAA32DDF3C85008BE0D0 /* Project object */;
+}
