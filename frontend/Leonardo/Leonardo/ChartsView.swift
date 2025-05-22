@@ -34,9 +34,25 @@ struct ChartsView: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-            Text("\(stock.Name)(\(stock.Code))")
-                .font(.headline)
-                .padding()
+            HStack(alignment: .center) {
+                Text("\(stock.Name)(\(stock.Code))")
+                    .font(.headline)
+                    .padding()
+                
+                Text("26주")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Toggle(isOn: $show52Weeks) {
+                    EmptyView()
+                }
+                .labelsHidden()
+                .toggleStyle(SwitchToggleStyle(tint: .blue))
+
+                Text("52주")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
 
             if candles.isEmpty {
                 Text("로딩 중...").onAppear {
@@ -44,27 +60,12 @@ struct ChartsView: View {
                 }
             } else {
                 HStack {
-                    Button(action: {
-                        show52Weeks = false
-                        fetchCandleData(for: stock.Code)
-                    }) {
-                        Text("26주")
-                            .padding(8)
-                            .background(show52Weeks ? Color.gray.opacity(0.2) : Color.blue.opacity(0.2))
-                            .cornerRadius(8)
-                    }
-
-                    Button(action: {
-                        show52Weeks = true
-                        fetchCandleData(for: stock.Code)
-                    }) {
-                        Text("52주")
-                            .padding(8)
-                            .background(show52Weeks ? Color.blue.opacity(0.2) : Color.gray.opacity(0.2))
-                            .cornerRadius(8)
-                    }
+                    
                 }
                 .padding(.horizontal)
+                .onChange(of: show52Weeks) { _, _ in
+                    fetchCandleData(for: stock.Code)
+                }
 
                 Chart(candles) { candle in
                     RuleMark(
@@ -103,7 +104,7 @@ struct ChartsView: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .onChange(of: stock.Code) { newCode in
+        .onChange(of: stock.Code, initial: false) { oldCode, newCode in
             fetchCandleData(for: newCode)
         }
     }

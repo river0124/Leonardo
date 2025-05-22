@@ -52,25 +52,41 @@ struct StockItem: Identifiable, Decodable {
 struct StockListView: View {
     @StateObject private var viewModel = StockViewModel()
     @Binding var selectedStock: StockItem?
+    @FocusState private var focusedStockID: String?
 
     var body: some View {
-        VStack {
-            List {
-                ForEach(viewModel.stocks) { stock in
+        VStack(alignment: .leading) {
+            Text("52주 신고가 종목: \(viewModel.stocks.count) 종목")
+                .font(.headline)
+                .padding(.horizontal)
+
+            List(viewModel.stocks, id: \.id) { stock in
+                Button {
+                    selectedStock = stock
+                    focusedStockID = stock.id
+                } label: {
                     VStack(alignment: .leading, spacing: 6) {
-                        Button(action: {
-                            selectedStock = stock
-                        }) {
-                            Text("\(stock.Name)(\(stock.Code))")
-                                .font(.headline)
-                        }
+                        Text("\(stock.Name)(\(stock.Code))")
+                            .font(.headline)
                         Text("현재가: \(stock.CurrentPrice), 신고가: \(stock.High52Week), 비율: \(String(format: "%.1f", stock.Ratio))%")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
                     .padding(.vertical, 4)
+                    .padding(.horizontal)
                 }
+                .listRowBackground(focusedStockID == stock.id ? Color.gray.opacity(0.2) : Color.clear)
+                .buttonStyle(PlainButtonStyle())
+                .onTapGesture {
+                    selectedStock = stock
+                    focusedStockID = stock.id
+                }
+                .focused($focusedStockID, equals: stock.id)
             }
+            .listStyle(.plain)
         }
+        // Note: For full keyboard navigation support (up/down arrow keys) in SwiftUI List,
+        // consider using AppKit bridge on macOS or UIKit custom focus management on iOS.
+        // SwiftUI currently lacks built-in support for arrow key navigation in List.
     }
 }
