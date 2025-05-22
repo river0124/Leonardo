@@ -1,2 +1,50 @@
+# macOS
 .DS_Store
-.DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Logs and runtime
+*.log
+*.pid
+*.seed
+*.bak
+*.swp
+*.tmp
+
+# IDE/editor
+.idea/
+.vscode/
+*.iml
+
+# Xcode
+*.xcuserdata/
+*.xcuserstate
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/
+*.xcuserdatad/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Other project build files
+build/
+*.orig
+
+
+# Output caches
+cache/
+cache/*
+logs/
+
+# Project config
+config.yaml
+
+# Backup or temp files
+*~
+*.bak
+*.tmp
