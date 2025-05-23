@@ -48,3 +48,5 @@ config.yaml
 *~
 *.bak
 *.tmp
+*.xcuserstate
+backend/token.json
