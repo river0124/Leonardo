@@ -91,13 +91,13 @@ struct ChartsView: View {
                 Spacer()
                 if !priceInfo.isEmpty {
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text("현재가: \(priceInfo["stck_prpr"] ?? "-")")
-                        Text("시가: \(priceInfo["stck_oprc"] ?? "-")")
-                        Text("고가: \(priceInfo["stck_hgpr"] ?? "-")")
-                        Text("저가: \(priceInfo["stck_lwpr"] ?? "-")")
-                        Text("전일대비: \(priceInfo["prdy_vrss"] ?? "-")")
+                        Text("현재가: \(formattedNumber(priceInfo["stck_prpr"]))")
+                        Text("시가: \(formattedNumber(priceInfo["stck_oprc"]))")
+                        Text("고가: \(formattedNumber(priceInfo["stck_hgpr"]))")
+                        Text("저가: \(formattedNumber(priceInfo["stck_lwpr"]))")
+                        Text("전일대비: \(formattedNumber(priceInfo["prdy_vrss"]))")
                         Text("등락률: \(priceInfo["prdy_ctrt"] ?? "-")%")
-                        Text("누적거래량: \(priceInfo["acml_vol"] ?? "-")")
+                        Text("누적거래량: \(formattedNumber(priceInfo["acml_vol"]))")
                     }
                     .font(.caption)
                     .padding(.horizontal)
@@ -117,8 +117,78 @@ struct ChartsView: View {
                         fetchCandleData(for: stock.Code)
                     }
 
-                VStack(spacing: 0) {
+                ZStack(alignment: .topLeading) {
                     Chart {
+                        // MA5 (5-day moving average) line
+                        let ma5 = candles.enumerated().map { index, _ in
+                            let start = max(0, index - 4)
+                            let subset = candles[start...index]
+                            let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
+                            return (candles[index].date, avg)
+                        }
+                        ForEach(ma5, id: \.0) { (date, avg) in
+                            LineMark(
+                                x: .value("날짜", date),
+                                y: .value("MA5", avg),
+                                series: .value("Series", "MA5")
+                            )
+                            .foregroundStyle(.green)
+                            .lineStyle(StrokeStyle(lineWidth: 1.5))
+                            .opacity(0.6)
+                        }
+
+                        // MA20 (20-day moving average) line
+                        let ma20 = candles.enumerated().map { index, _ in
+                            let start = max(0, index - 19)
+                            let subset = candles[start...index]
+                            let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
+                            return (candles[index].date, avg)
+                        }
+                        ForEach(ma20, id: \.0) { (date, avg) in
+                            LineMark(
+                                x: .value("날짜", date),
+                                y: .value("MA20", avg),
+                                series: .value("Series", "MA20")
+                            )
+                            .foregroundStyle(.red)
+                            .lineStyle(StrokeStyle(lineWidth: 1.5))
+                            .opacity(0.6)
+                        }
+
+                        let ma60 = candles.enumerated().map { index, _ in
+                            let start = max(0, index - 59)
+                            let subset = candles[start...index]
+                            let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
+                            return (candles[index].date, avg)
+                        }
+                        ForEach(ma60, id: \.0) { (date, avg) in
+                            LineMark(
+                                x: .value("날짜", date),
+                                y: .value("MA60", avg),
+                                series: .value("Series", "MA60")
+                            )
+                            .foregroundStyle(.orange)
+                            .lineStyle(StrokeStyle(lineWidth: 1.5))
+                            .opacity(0.6)
+                        }
+
+                        let ma120 = candles.enumerated().map { index, _ in
+                            let start = max(0, index - 119)
+                            let subset = candles[start...index]
+                            let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
+                            return (candles[index].date, avg)
+                        }
+                        ForEach(ma120, id: \.0) { (date, avg) in
+                            LineMark(
+                                x: .value("날짜", date),
+                                y: .value("MA120", avg),
+                                series: .value("Series", "MA120")
+                            )
+                            .foregroundStyle(.purple)
+                            .lineStyle(StrokeStyle(lineWidth: 1.5))
+                            .opacity(0.6)
+                        }
+
                         ForEach(candles) { candle in
                             RuleMark(
                                 x: .value("날짜", candle.date),
@@ -205,6 +275,20 @@ struct ChartsView: View {
                     .chartYScale(domain: yRange ?? 0...1)
                     .frame(height: 360)
                     .padding(.horizontal)
+
+                    // 평균선 안내 레이블 (Chart 위에 표시)
+                    HStack(spacing: 12) {
+                        Text("5").foregroundColor(.green).opacity(0.6)
+                        Text("20").foregroundColor(.red).opacity(0.6)
+                        Text("60").foregroundColor(.orange).opacity(0.6)
+                        Text("120").foregroundColor(.purple).opacity(0.6)
+                    }
+                    .font(.caption2)
+                    .padding(6)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .padding(.top, 12)
+                    .padding(.leading, 20)
                 }
             }
         }
@@ -293,5 +377,9 @@ struct ChartsView: View {
                 print("❌ 가격 JSON 에러:", error)
             }
         }.resume()
+    }
+    func formattedNumber(_ value: String?) -> String {
+        guard let value = value, let number = Int(value) else { return value ?? "-" }
+        return NumberFormatter.localizedString(from: NSNumber(value: number), number: .decimal)
     }
 }

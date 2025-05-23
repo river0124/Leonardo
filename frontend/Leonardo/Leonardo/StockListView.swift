@@ -70,9 +70,6 @@ struct StockListView: View {
                             Text("\(stock.Name)(\(stock.Code))")
                                 .font(.headline)
                             Spacer()
-                            Text("비율: \(String(format: "%.1f", stock.Ratio))%")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
                         }
                         .padding(.vertical, 4)
                         .padding(.horizontal)

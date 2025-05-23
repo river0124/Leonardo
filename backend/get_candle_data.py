@@ -6,12 +6,12 @@ DEBUG_PRINT = 1  # 1 to enable prints, 0 to disable
 
 def get_candle_chart_data(code):
     """
-    주어진 종목 코드(code)에 대해 52주간 일봉 데이터를 가져와
+    주어진 종목 코드(code)에 대해 약 400일간 일봉 데이터를 가져와
     날짜, 시가, 고가, 저가, 종가, 거래량 정보를 포함하는 리스트를 반환한다.
     """
     try:
         end_date = datetime.datetime.today()
-        start_date = end_date - datetime.timedelta(weeks=52)
+        start_date = end_date - datetime.timedelta(days=400)
         df = fdr.DataReader(code, start_date, end_date)
 
         df = df.reset_index()

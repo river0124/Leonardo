@@ -13,10 +13,10 @@ struct WatchListView: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-            Text("주시 종목: \(appModel.watchlistCodes.count) 종목")
-                .font(.headline)
-                .padding(.horizontal)
-
+                Text("주시 종목: \(appModel.watchlistCodes.count) 종목")
+                    .font(.headline)
+                    .padding(.horizontal)
+            
             List(appModel.watchlistCodes, id: \.self) { code in
 
                 let item = appModel.stockCache[code] ?? WatchStockItem(
