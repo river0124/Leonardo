@@ -135,6 +135,17 @@ struct ChartsView: View {
                             )
                             .foregroundStyle(candle.close >= candle.open ? .red : .blue)
                             .cornerRadius(1)
+                            
+                            let priceRange = (yRange?.upperBound ?? 1) - (yRange?.lowerBound ?? 0)
+                            let volumeHeight = priceRange * 0.15
+                            let maxVolume = candles.map(\.volume).max() ?? 1
+
+                            BarMark(
+                                x: .value("날짜", candle.date),
+                                yStart: .value("거래량 시작", (yRange?.lowerBound ?? 0)),
+                                yEnd: .value("거래량", (candle.volume / maxVolume) * volumeHeight + (yRange?.lowerBound ?? 0))
+                            )
+                            .foregroundStyle(.purple.opacity(0.3))
                         }
 
                         if let highest = candles.max(by: { $0.high < $1.high }) {
@@ -194,22 +205,7 @@ struct ChartsView: View {
                     .chartYScale(domain: yRange ?? 0...1)
                     .frame(height: 360)
                     .padding(.horizontal)
-
-                    Chart {
-                        ForEach(candles) { candle in
-                            BarMark(
-                                x: .value("날짜", candle.date),
-                                y: .value("거래량", candle.volume)
-                            )
-                            .foregroundStyle(.purple.opacity(0.3))
-                        }
-                    }
-                    .chartXAxis(.hidden)
-                    .chartYAxis(.hidden)
-                    .frame(height: 60)
-                    .padding(.horizontal)
                 }
-                .padding(.top, 0)
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
