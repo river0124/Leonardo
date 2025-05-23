@@ -65,15 +65,18 @@ struct StockListView: View {
                     selectedStock = stock
                     focusedStockID = stock.id
                 } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("\(stock.Name)(\(stock.Code))")
-                            .font(.headline)
-                        Text("현재가: \(stock.CurrentPrice), 신고가: \(stock.High52Week), 비율: \(String(format: "%.1f", stock.Ratio))%")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                    VStack {
+                        HStack {
+                            Text("\(stock.Name)(\(stock.Code))")
+                                .font(.headline)
+                            Spacer()
+                            Text("비율: \(String(format: "%.1f", stock.Ratio))%")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal)
                     }
-                    .padding(.vertical, 4)
-                    .padding(.horizontal)
                 }
                 .listRowBackground(focusedStockID == stock.id ? Color.gray.opacity(0.2) : Color.clear)
                 .buttonStyle(PlainButtonStyle())

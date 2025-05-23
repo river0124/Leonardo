@@ -12,8 +12,14 @@ from base64 import b64decode
 from bokeh.layouts import column
 from joblib.testing import param
 from loguru import logger
+
+
+# 로그 경로를 현재 파일(__file__) 기준으로 안전하게 구성
+LOG_PATH = os.path.join(os.path.dirname(__file__), "logs", "trading_{time:YYYY-MM-DD}.log")
+os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+
 # 로그 파일 설정
-logger.add("../../Documents/Leonardo/backend/logs/trading_{time:YYYY-MM-DD}.log", rotation="10 MB", retention="10 days", encoding="utf-8", enqueue=True)
+logger.add(LOG_PATH, rotation="10 MB", retention="10 days", encoding="utf-8", enqueue=True)
 import pandas as pd
 
 class KoreaInvestEnv:

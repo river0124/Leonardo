@@ -50,3 +50,4 @@ config.yaml
 *.tmp
 *.xcuserstate
 backend/token.json
+backend/token.json

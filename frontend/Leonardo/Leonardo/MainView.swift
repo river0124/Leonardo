@@ -7,6 +7,7 @@ struct MainView: View {
 
     @State private var selectedTab: Tab = .stocks
     @State private var selectedStock: StockItem? = nil
+    @State private var selectedWatchStock: WatchStockItem? = nil
 
     var body: some View {
         NavigationSplitView {
@@ -23,7 +24,7 @@ struct MainView: View {
             case .stocks:
                 StockListView(selectedStock: $selectedStock)
             case .watchlist:
-                Text("Watchlist View")
+                WatchListView(selectedStock: $selectedWatchStock)
             case .chart:
                 Text("Chart View")
             case .portfolio:
@@ -32,9 +33,28 @@ struct MainView: View {
                 Text("Settings View")
             }
         } detail: {
-            if let stock = selectedStock {
-                ChartsView(stock: stock)
-            } else {
+            switch selectedTab {
+            case .stocks:
+                if let stock = selectedStock {
+                    ChartsView(stock: stock)
+                } else {
+                    Text("세부 정보를 선택하세요")
+                        .foregroundStyle(.secondary)
+                }
+            case .watchlist:
+                if let stock = selectedWatchStock {
+                    ChartsView(stock: StockItem(
+                        Code: stock.Code,
+                        Name: stock.Name,
+                        CurrentPrice: 0,
+                        High52Week: 0,
+                        Ratio: 0
+                    ))
+                } else {
+                    Text("세부 정보를 선택하세요")
+                        .foregroundStyle(.secondary)
+                }
+            default:
                 Text("세부 정보를 선택하세요")
                     .foregroundStyle(.secondary)
             }

@@ -1,10 +1,24 @@
 # flask_server.py
 import json
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from get_asset import get_total_asset
 from get_candle_data import get_candle_chart_data
-from find_52week_high_candidates import find_52week_high_candidates
+from watchlist_store import load_watchlist, add_code_to_watchlist, remove_code_from_watchlist
+from utils import KoreaInvestEnv, KoreaInvestAPI
+import yaml
+import pandas as pd
 
+# YAML 설정 불러오기
+with open("/Users/hyungseoklee/Documents/Leonardo/backend/config.yaml", "r") as f:
+    cfg = yaml.safe_load(f)
+
+# 투자 환경 및 API 초기화
+env = KoreaInvestEnv(cfg)
+api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers())
+
+stock_df = pd.read_csv("/Users/hyungseoklee/Documents/Leonardo/backend/cache/stock_list.csv", dtype=str)
+
+# Flask 앱 초기화
 app = Flask(__name__)
 
 @app.route('/candle', methods=['GET'])
@@ -57,6 +71,60 @@ def high52():
         return jsonify(data), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/price', methods=['GET'])
+def get_price():
+    stock_no = request.args.get('stock_no')
+    if not stock_no:
+        return jsonify({"error": "stock_no is required"}), 400
+    try:
+        data = api.get_current_price(stock_no)
+        stock_name = stock_df.loc[stock_df['Code'] == stock_no, 'Name'].values
+        stock_name = stock_name[0] if len(stock_name) > 0 else "이름없음"
+        filtered = {
+            "name": stock_name,
+            "stck_prpr": data.get("stck_prpr"),
+            "stck_oprc": data.get("stck_oprc"),
+            "stck_hgpr": data.get("stck_hgpr"),
+            "stck_lwpr": data.get("stck_lwpr"),
+            "prdy_vrss": data.get("prdy_vrss"),
+            "prdy_ctrt": data.get("prdy_ctrt"),
+            "acml_vol": data.get("acml_vol"),
+            "hts_avls": data.get("hts_avls"),
+            "w52_hgpr": data.get("w52_hgpr"),
+            "w52_lwpr": data.get("w52_lwpr")
+        }
+        return Response(
+            json.dumps(filtered, ensure_ascii=False),
+            content_type='application/json; charset=utf-8'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/watchlist", methods=["GET", "POST", "DELETE"])
+def watchlist():
+    try:
+        if request.method == "GET":
+            return jsonify({"watchlist": load_watchlist()})
+
+        data = request.get_json()
+        code = data.get("code")
+
+        if not code:
+            return jsonify({"error": "Missing 'code' field in request"}), 400
+
+        if request.method == "POST":
+            add_code_to_watchlist(code)
+            return jsonify({"message": f"{code} added to watchlist."}), 200
+
+        if request.method == "DELETE":
+            remove_code_from_watchlist(code)
+            return jsonify({"message": f"{code} removed from watchlist."}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051)
