@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MainView: View {
     enum Tab {
-        case stocks, chart, portfolio, settings
+        case stocks, watchlist, chart, portfolio, settings
     }
 
     @State private var selectedTab: Tab = .stocks
@@ -12,6 +12,7 @@ struct MainView: View {
         NavigationSplitView {
             List(selection: $selectedTab) {
                 Label("추천종목", systemImage: "list.bullet").tag(Tab.stocks)
+                Label("주시종목", systemImage: "star").tag(Tab.watchlist)
                 Label("차트", systemImage: "chart.line.uptrend.xyaxis").tag(Tab.chart)
                 Label("포트폴리오", systemImage: "wallet.pass").tag(Tab.portfolio)
                 Label("설정", systemImage: "gearshape").tag(Tab.settings)
@@ -21,6 +22,8 @@ struct MainView: View {
             switch selectedTab {
             case .stocks:
                 StockListView(selectedStock: $selectedStock)
+            case .watchlist:
+                Text("Watchlist View")
             case .chart:
                 Text("Chart View")
             case .portfolio:

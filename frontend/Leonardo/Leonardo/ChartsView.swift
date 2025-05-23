@@ -63,26 +63,70 @@ struct ChartsView: View {
                     
                 }
                 .padding(.horizontal)
+                .padding(.top, -8)
                 .onChange(of: show52Weeks) { _, _ in
                     fetchCandleData(for: stock.Code)
                 }
 
-                Chart(candles) { candle in
-                    RuleMark(
-                        x: .value("날짜", candle.date),
-                        yStart: .value("저가", candle.low),
-                        yEnd: .value("고가", candle.high)
-                    )
-                    .lineStyle(StrokeStyle(lineWidth: 1))
-                    .foregroundStyle(.gray)
+                Chart {
+                    ForEach(candles) { candle in
+                        RuleMark(
+                            x: .value("날짜", candle.date),
+                            yStart: .value("저가", candle.low),
+                            yEnd: .value("고가", candle.high)
+                        )
+                        .lineStyle(StrokeStyle(lineWidth: 1))
+                        .foregroundStyle(.gray)
 
-                    RectangleMark(
-                        x: .value("날짜", candle.date),
-                        yStart: .value("시가", candle.open),
-                        yEnd: .value("종가", candle.close)
-                    )
-                    .foregroundStyle(candle.close >= candle.open ? .red : .blue)
-                    .cornerRadius(1)
+                        RectangleMark(
+                            x: .value("날짜", candle.date),
+                            yStart: .value("시가", candle.open),
+                            yEnd: .value("종가", candle.close)
+                        )
+                        .foregroundStyle(candle.close >= candle.open ? .red : .blue)
+                        .cornerRadius(1)
+                    }
+
+                    if let highest = candles.max(by: { $0.high < $1.high }) {
+                        PointMark(
+                            x: .value("날짜", highest.date),
+                            y: .value("고가", highest.high)
+                        )
+                        .symbol {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8))
+                                .foregroundColor(.gray)
+                        }
+                        .symbolSize(10)
+                        .foregroundStyle(.red) // 포인트 색상
+
+                        .annotation(position: .topLeading) {
+                            Text("최고 \(Int(highest.high)), \(highest.date)")
+                                .font(.caption)
+                                .foregroundColor(.red) // 텍스트 색상 분리
+                                .offset(x: 40)
+                        }
+                    }
+
+                    if let lowest = candles.min(by: { $0.low < $1.low }) {
+                        PointMark(
+                            x: .value("날짜", lowest.date),
+                            y: .value("저가", lowest.low)
+                        )
+                        .symbol {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8))
+                                .foregroundColor(.gray)
+                        }
+                        .symbolSize(10)
+                        .foregroundStyle(.blue) // 파란색 대신 초록색으로 변경해도 됨
+
+                        .annotation(position: .bottomLeading) {
+                            Text("최저 \(Int(lowest.low)), \(lowest.date)")
+                                .font(.caption)
+                                .foregroundColor(.blue) // 텍스트 색상 분리
+                        }
+                    }
                 }
                 .chartXAxis {
                     AxisMarks(values: .stride(by: 15)) { value in
@@ -99,7 +143,7 @@ struct ChartsView: View {
                     }
                 }
                 .chartYScale(domain: yRange ?? 0...1)
-                .frame(height: 600)
+                .frame(height: 420)
                 .padding()
             }
         }
