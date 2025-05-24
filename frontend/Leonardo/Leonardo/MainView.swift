@@ -12,7 +12,7 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedTab) {
-                Label("보유 종목", systemImage: "tray.full").tag(Tab.portfolioDummy)
+                Label("자산현황", systemImage: "tray.full").tag(Tab.portfolioDummy)
                 Label("추천종목", systemImage: "list.bullet").tag(Tab.stocks)
                 Label("관심종목", systemImage: "star").tag(Tab.watchlist)
                 Label("차트", systemImage: "chart.line.uptrend.xyaxis").tag(Tab.chart)

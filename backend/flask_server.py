@@ -190,5 +190,31 @@ def holdings():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# /holdings/detail endpoint
+@app.route('/holdings/detail', methods=['GET'])
+def holdings_detail():
+    try:
+        result = api.get_holdings_detailed()
+        if result is None:
+            return jsonify({"error": "No holdings found"}), 404
+
+        stocks = result["stocks"]
+        summary = result["summary"]
+
+        if isinstance(stocks, pd.DataFrame) and not stocks.empty:
+            stocks = stocks.drop(columns=["trad_dvsn_name"], errors="ignore").to_dict(orient="records")
+
+        # Remove unwanted keys from summary
+        summary.pop("자산증감액", None)
+        summary.pop("총평가금액", None)
+
+        return jsonify({
+            "stocks": stocks,
+            "summary": summary
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051)

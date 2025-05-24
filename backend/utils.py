@@ -324,7 +324,6 @@ class KoreaInvestAPI:
         #     senddata = '{"header":{"approval_key":"' + self.q_approval_key + '","personalseckey":"' + self.q_personalsecKey + '","custtype":"' + self.custtype + '","tr_type":' + tr_type +
 
     def get_holdings(self):
-        logger.info("📡 get_holdings() 함수 진입")
         url = "/uapi/domestic-stock/v1/trading/inquire-balance"
         tr_id = "VTTC8434R" if self.is_paper_trading else "TTTC8434R"
         params = {
@@ -342,7 +341,6 @@ class KoreaInvestAPI:
         }
 
         response = self._url_fetch(url, tr_id, params)
-        logger.info(f"📡 get_holdings - response: {response}")
         if response is None:
             logger.warning("❌ API 호출 결과: response is None")
         elif not response.is_ok():
@@ -350,16 +348,51 @@ class KoreaInvestAPI:
 
         if response and response.is_ok():
             body = response.get_body()
-            logger.info(f"📦 응답 바디: {body}")
             try:
                 if hasattr(body, "output1") and body.output1:
-                    logger.info(f"✅ 보유 종목 조회 성공: {len(body.output1)}개")
                     return pd.DataFrame(body.output1)
                 else:
                     return pd.DataFrame()
             except Exception as e:
                 logger.info(f"보유 종목 조회 오류: {e}")
                 return pd.DataFrame()
+
+    def get_holdings_detailed(self):
+        url = "/uapi/domestic-stock/v1/trading/inquire-balance"
+        tr_id = "VTTC8434R" if self.is_paper_trading else "TTTC8434R"
+        params = {
+            "CANO": self.account_num[:8],
+            "ACNT_PRDT_CD": self.account_num[8:],
+            "AFHR_FLPR_YN": "N",
+            "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "01",
+            "OFL_YN": "N",
+            "INQR_DVSN": "01",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": ""
+        }
+
+        response = self._url_fetch(url, tr_id, params)
+        if response is None or not response.is_ok():
+            logger.warning("❌ API 호출 실패 또는 응답 오류")
+            return None
+
+        body = response.get_body()
+        output1 = pd.DataFrame(body.output1) if hasattr(body, "output1") else pd.DataFrame()
+        output2 = body.output2[0] if hasattr(body, "output2") and body.output2 else {}
+
+        return {
+            "stocks": output1,
+            "summary": {
+                "예수금총금액": output2.get("dnca_tot_amt"),
+                "익일정산금액": output2.get("nxdy_excc_amt"),
+                "가수도정산금액": output2.get("prvs_rcdl_excc_amt"),
+                "총평가금액": output2.get("tot_evlu_amt"),
+                "자산증감액": output2.get("asst_icdc_amt"),
+            }
+        }
 
 
     def get_total_asset(self):

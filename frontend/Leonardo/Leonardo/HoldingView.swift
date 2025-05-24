@@ -5,40 +5,94 @@ struct HoldingItem: Identifiable, Codable {
 
     let code: String
     let name: String
-    let quantity: Int
-    let availableQuantity: Int?
-    let avgPrice: Double?
-    let currentPrice: Int?
-    let evaluationAmount: Int?
-    let profitLoss: Int?
-    let profitLossRate: Double?
+    let quantity: String
+    let availableQuantity: String?
+    let avgPrice: String?
+    let currentPrice: String?
+    let evaluationAmount: String?
+    let profitLoss: String?
+    let profitLossRate: String?
+    let pchsAmt: String?
+    let evluErngRt: String?
+    let flttRt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case code = "pdno"
+        case name = "prdt_name"
+        case quantity = "hldg_qty"
+        case availableQuantity = "ord_psbl_qty"
+        case avgPrice = "pchs_avg_pric"
+        case currentPrice = "prpr"
+        case evaluationAmount = "evlu_amt"
+        case profitLoss = "evlu_pfls_amt"
+        case profitLossRate = "evlu_pfls_rt"
+        case pchsAmt = "pchs_amt"
+        case evluErngRt = "evlu_erng_rt"
+        case flttRt = "fltt_rt"
+    }
 }
 
 struct HoldingView: View {
     @State private var holdings: [HoldingItem] = []
+    @State private var depositSummary: [String: String] = [:]
+
+    func formatNumber(_ number: String?) -> String {
+        guard let value = Double(number ?? "") else { return number ?? "-" }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+    
+    func formatPercent(_ number: String?, decimals: Int = 2) -> String {
+        guard let value = Double(number ?? "") else { return number ?? "-" }
+        return String(format: "%.\(decimals)f%%", value)
+    }
 
     var body: some View {
         VStack(alignment: .leading) {
             Text("보유 종목 (\(holdings.count)개)")
                 .font(.title2)
                 .padding()
+            
+            if !depositSummary.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("💰 예수금 요약")
+                        .font(.headline)
+                    Text("D 예수금: \(formatNumber(depositSummary["예수금총금액"]))")
+                    Text("D+1 예수금: \(formatNumber(depositSummary["익일정산금액"]))")
+                    Text("D+2 예수금: \(formatNumber(depositSummary["가수도정산금액"]))")
+                }
+                .padding()
+            }
 
             List(holdings) { item in
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(item.name) (\(item.code))")
+                    Text("종목명: \(item.name) (\(item.code))")
                         .font(.headline)
                     HStack {
-                        Text("수량: \(item.quantity)")
-                        Text("평균가: \(item.avgPrice ?? 0, specifier: "%.1f")")
-                        Text("현재가: \(item.currentPrice ?? 0)")
+                        Text("보유수량: \(formatNumber(item.quantity))")
+                        Text("주문가능수량: \(formatNumber(item.availableQuantity))")
                     }
-                    .font(.subheadline)
                     HStack {
-                        Text("평가손익: \(item.profitLoss ?? 0)")
-                        Text("수익률: \(item.profitLossRate ?? 0, specifier: "%.2f")%")
+                        Text("매입평균가격: \(formatNumber(item.avgPrice))")
+                        Text("매입금액: \(formatNumber(item.pchsAmt))")
                     }
+                    HStack {
+                        Text("현재가: \(formatNumber(item.currentPrice))")
+                        Text("평가금액: \(formatNumber(item.evaluationAmount))")
+                    }
+                    HStack {
+                        Text("평가손익금액: \(formatNumber(item.profitLoss))")
+                        Text("평가손익률: \(formatPercent(item.profitLossRate))")
+                    }
+                    HStack {
+                        Text("평가수익률(정밀): \(formatPercent(item.evluErngRt, decimals: 4))")
+                        Text("전일대비등락률: \(formatPercent(item.flttRt))")
+                    }
+                    .foregroundColor((Int(item.profitLoss ?? "0") ?? 0) >= 0 ? .red : .blue)
                     .font(.footnote)
-                    .foregroundColor((item.profitLoss ?? 0) >= 0 ? .red : .blue)
                 }
                 .padding(.vertical, 4)
             }
@@ -47,18 +101,25 @@ struct HoldingView: View {
     }
 
     func fetchHoldings() {
-        guard let url = URL(string: "http://127.0.0.1:5051/holdings") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5051/holdings/detail") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, _ in
             guard let data = data else { return }
 
             do {
                 let decoder = JSONDecoder()
-                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                let result = try decoder.decode([HoldingItem].self, from: data)
-
-                DispatchQueue.main.async {
-                    holdings = result
+                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                if let stockData = json?["stocks"] {
+                    let stockJSON = try JSONSerialization.data(withJSONObject: stockData)
+                    let result = try decoder.decode([HoldingItem].self, from: stockJSON)
+                    DispatchQueue.main.async {
+                        holdings = result
+                    }
+                }
+                if let summary = json?["summary"] as? [String: String] {
+                    DispatchQueue.main.async {
+                        depositSummary = summary
+                    }
                 }
             } catch {
                 print("❌ 보유 종목 디코딩 실패: \(error)")
