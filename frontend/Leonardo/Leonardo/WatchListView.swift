@@ -48,7 +48,7 @@ struct WatchListView: View {
     }
 
     func fetchStockInfo(code: String) {
-        guard let url = URL(string: "http://127.0.0.1:5051/price?stock_no=\(code)") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5051/stockname?code=\(code)") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, _ in
             guard let data = data else { return }

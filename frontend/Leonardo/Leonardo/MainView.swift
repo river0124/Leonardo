@@ -2,18 +2,19 @@ import SwiftUI
 
 struct MainView: View {
     enum Tab {
-        case stocks, watchlist, chart, portfolio, settings
+        case stocks, watchlist, chart, portfolio, settings, portfolioDummy
     }
 
-    @State private var selectedTab: Tab = .stocks
+    @State private var selectedTab: Tab = .portfolioDummy
     @State private var selectedStock: StockItem? = nil
     @State private var selectedWatchStock: WatchStockItem? = nil
 
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedTab) {
+                Label("보유 종목", systemImage: "tray.full").tag(Tab.portfolioDummy)
                 Label("추천종목", systemImage: "list.bullet").tag(Tab.stocks)
-                Label("주시종목", systemImage: "star").tag(Tab.watchlist)
+                Label("관심종목", systemImage: "star").tag(Tab.watchlist)
                 Label("차트", systemImage: "chart.line.uptrend.xyaxis").tag(Tab.chart)
                 Label("포트폴리오", systemImage: "wallet.pass").tag(Tab.portfolio)
                 Label("설정", systemImage: "gearshape").tag(Tab.settings)
@@ -31,6 +32,8 @@ struct MainView: View {
                 Text("Portfolio View")
             case .settings:
                 Text("Settings View")
+            case .portfolioDummy:
+                EmptyView()
             }
         } detail: {
             switch selectedTab {
@@ -54,6 +57,10 @@ struct MainView: View {
                     Text("세부 정보를 선택하세요")
                         .foregroundStyle(.secondary)
                 }
+            case .portfolio:
+                Text("보유 종목 View")
+            case .portfolioDummy:
+                EmptyView()
             default:
                 Text("세부 정보를 선택하세요")
                     .foregroundStyle(.secondary)

@@ -2,7 +2,7 @@ import pandas as pd
 import FinanceDataReader as fdr
 import datetime
 
-DEBUG_PRINT = 1  # 1 to enable prints, 0 to disable
+DEBUG_PRINT = 0  # 1 to enable prints, 0 to disable
 
 def get_candle_chart_data(code):
     """

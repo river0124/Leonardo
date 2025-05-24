@@ -7,6 +7,9 @@ from watchlist_store import load_watchlist, add_code_to_watchlist, remove_code_f
 from utils import KoreaInvestEnv, KoreaInvestAPI
 import yaml
 import pandas as pd
+from stock_name_finder import get_stock_name_by_code
+
+DEBUG = 0  # Set to 1 to enable print, 0 to disable
 
 # YAML 설정 불러오기
 with open("/Users/hyungseoklee/Documents/Leonardo/backend/config.yaml", "r") as f:
@@ -32,8 +35,8 @@ def candle():
 
         candles = result.get("candles", [])
         valid_candles = [c for c in candles if all(c.get(k) is not None and c.get(k) >= 0 for k in ['open', 'high', 'low', 'close'])]
-        print("🛠 필터 전 캔들 수:", len(candles))
-        print("🛠 필터 후 캔들 수:", len(valid_candles))
+        if DEBUG: print("🛠 필터 전 캔들 수:", len(candles))
+        if DEBUG: print("🛠 필터 후 캔들 수:", len(valid_candles))
 
         if not valid_candles:
             return jsonify({"error": "No valid candle data"}), 500
@@ -41,14 +44,15 @@ def candle():
         result["candles"] = valid_candles
 
         import json
-        print("\n=== 서버 응답 데이터 ===")
-        print("요청된 종목 코드:", code)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-        print("========================\n")
+        if DEBUG:
+            print("\n=== 서버 응답 데이터 ===")
+            print("요청된 종목 코드:", code)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            print("========================\n")
 
         return jsonify(result), 200
     except Exception as e:
-        print(f"서버 에러 발생: {str(e)}")
+        if DEBUG: print(f"서버 에러 발생: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # /asset endpoint
@@ -125,6 +129,28 @@ def watchlist():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# New endpoint to get stock name by code
+@app.route('/stockname', methods=['GET'])
+def stockname():
+    code = request.args.get('code')
+    if not code:
+        return Response(
+            json.dumps({"error": "Missing code parameter"}, ensure_ascii=False),
+            content_type='application/json; charset=utf-8'
+        )
+
+    name = get_stock_name_by_code(code)
+    if name:
+        return Response(
+            json.dumps({"code": code, "name": name}, ensure_ascii=False),
+            content_type='application/json; charset=utf-8'
+        )
+    else:
+        return Response(
+            json.dumps({"error": "Stock name not found"}, ensure_ascii=False),
+            content_type='application/json; charset=utf-8'
+        )
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051)
