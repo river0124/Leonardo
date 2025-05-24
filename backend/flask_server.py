@@ -216,5 +216,33 @@ def holdings_detail():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# /total_asset/summary endpoint
+@app.route('/total_asset/summary', methods=['GET'])
+def total_asset_summary():
+    try:
+        result = api.get_holdings_detailed()
+        if result is None or "summary" not in result:
+            return jsonify({"error": "Summary data not found"}), 404
+
+        summary = result["summary"]
+        keys_to_include = [
+            "예수금총금액",
+            "익일정산금액",
+            "가수도정산금액",
+            "총평가금액",
+            "금일매수수량",
+            "금일매도수량",
+            "금일제비용금액"
+        ]
+
+        filtered_summary = {k: summary.get(k) or "0" for k in keys_to_include}
+        return Response(
+            json.dumps(filtered_summary, ensure_ascii=False),
+            content_type='application/json; charset=utf-8'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051)

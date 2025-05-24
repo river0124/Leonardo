@@ -391,6 +391,9 @@ class KoreaInvestAPI:
                 "가수도정산금액": output2.get("prvs_rcdl_excc_amt"),
                 "총평가금액": output2.get("tot_evlu_amt"),
                 "자산증감액": output2.get("asst_icdc_amt"),
+                "금일매수수량": output2.get("thdt_buyqty"),
+                "금일매도수량": output2.get("thdt_sll_qty"),
+                "금일제비용금액": output2.get("thdt_tlex_amt")
             }
         }
 

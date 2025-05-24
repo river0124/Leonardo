@@ -5,14 +5,23 @@ struct MainView: View {
         case stocks, watchlist, chart, portfolio, settings, portfolioDummy
     }
 
+    enum AssetDetailTab: Hashable {
+        case summary
+        case holdings
+        case profits
+        case orders
+        case trends
+    }
+
     @State private var selectedTab: Tab = .portfolioDummy
     @State private var selectedStock: StockItem? = nil
     @State private var selectedWatchStock: WatchStockItem? = nil
+    @State private var selectedAssetTab: AssetDetailTab? = .summary
 
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedTab) {
-                Label("자산현황", systemImage: "tray.full").tag(Tab.portfolioDummy)
+                Label("자산현황", systemImage: "wonsign.bank.building").tag(Tab.portfolioDummy)
                 Label("추천종목", systemImage: "list.bullet").tag(Tab.stocks)
                 Label("관심종목", systemImage: "star").tag(Tab.watchlist)
                 Label("차트", systemImage: "chart.line.uptrend.xyaxis").tag(Tab.chart)
@@ -33,7 +42,14 @@ struct MainView: View {
             case .settings:
                 Text("Settings View")
             case .portfolioDummy:
-                HoldingView()
+                List(selection: $selectedAssetTab) {
+                    NavigationLink("총자산", value: AssetDetailTab.summary)
+                    NavigationLink("보유종목", value: AssetDetailTab.holdings)
+                    NavigationLink("매매손익", value: AssetDetailTab.profits)
+                    NavigationLink("체결", value: AssetDetailTab.orders)
+                    NavigationLink("손익추이", value: AssetDetailTab.trends)
+                }
+                .navigationTitle("자산현황")
             }
         } detail: {
             switch selectedTab {
@@ -60,7 +76,21 @@ struct MainView: View {
             case .portfolio:
                 Text("보유 종목 View")
             case .portfolioDummy:
-                HoldingView()
+                switch selectedAssetTab {
+                case .summary:
+                    AssetSummaryView()
+                case .holdings:
+                    HoldingView()
+                case .profits:
+                    Text("매매손익 View (더미)")
+                case .orders:
+                    Text("체결 View (더미)")
+                case .trends:
+                    Text("손익추이 View (더미)")
+                case .none:
+                    Text("세부 정보를 선택하세요")
+                        .foregroundStyle(.secondary)
+                }
             default:
                 Text("세부 정보를 선택하세요")
                     .foregroundStyle(.secondary)
