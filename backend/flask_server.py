@@ -8,6 +8,8 @@ from utils import KoreaInvestEnv, KoreaInvestAPI
 import yaml
 import pandas as pd
 from stock_name_finder import get_stock_name_by_code
+from settings_manager import save_settings
+import os
 
 DEBUG = 0  # Set to 1 to enable print, 0 to disable
 
@@ -243,6 +245,36 @@ def total_asset_summary():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/settings', methods=['GET', 'POST'])
+def settings():
+    if request.method == 'GET':
+        try:
+            cache_file = os.path.join("cache", "settings.json")
+            if not os.path.exists(cache_file):
+                return jsonify({"error": "Settings file not found"}), 404
+
+            with open(cache_file, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+
+            return jsonify(settings), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    elif request.method == 'POST':
+        try:
+            data = request.get_json()
+            atr_period = data.get("atr_period")
+            max_loss_ratio = data.get("max_loss_ratio")
+
+            if atr_period is None or max_loss_ratio is None:
+                return jsonify({"error": "Missing atr_period or max_loss_ratio"}), 400
+
+            save_settings(atr_period, max_loss_ratio)
+            return jsonify({"message": "Settings saved successfully"}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051)

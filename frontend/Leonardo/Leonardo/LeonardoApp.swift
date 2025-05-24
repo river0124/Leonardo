@@ -17,6 +17,7 @@ struct LeonardoApp: App {
                 .environmentObject(appModel)
                 .onAppear {
                     appModel.fetchWatchlist()  // 시작 시 주시목록 불러오기
+                    appModel.loadSettings()  // 시작 시 설정 불러오기
                 }
         }
     }

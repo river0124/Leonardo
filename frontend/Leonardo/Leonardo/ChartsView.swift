@@ -26,6 +26,7 @@ struct ChartsView: View {
     @State private var candles: [Candle] = []
     @State private var show52Weeks = false
     @State private var priceInfo: [String: String] = [:]
+    @State private var bettingTextResult: String? = nil
     private var isStarred: Bool {
         appModel.watchlistCodes.contains(stock.Code)
     }
@@ -86,30 +87,50 @@ struct ChartsView: View {
                 .buttonStyle(.plain)
             }
             .padding(.horizontal)
-            
-            HStack{
-                Spacer()
-                if !priceInfo.isEmpty {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("현재가: \(formattedNumber(priceInfo["stck_prpr"]))")
-                        Text("시가: \(formattedNumber(priceInfo["stck_oprc"]))")
-                        Text("고가: \(formattedNumber(priceInfo["stck_hgpr"]))")
-                        Text("저가: \(formattedNumber(priceInfo["stck_lwpr"]))")
-                        Text("전일대비: \(formattedNumber(priceInfo["prdy_vrss"]))")
-                        Text("등락률: \(priceInfo["prdy_ctrt"] ?? "-")%")
-                        Text("누적거래량: \(formattedNumber(priceInfo["acml_vol"]))")
+
+            VStack {
+                HStack(alignment: .top) {
+                    if let text = bettingTextResult {
+                        Text(text)
+                            .font(.caption)
+                            .padding()
+                            .frame(minWidth: 180, maxWidth: 220, alignment: .leading)
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .font(.caption)
-                    .padding(.horizontal)
-                    .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    if !priceInfo.isEmpty {
+                        VStack(alignment: .trailing) {
+                            Text("현재가: \(formattedNumber(priceInfo["stck_prpr"]))")
+                            Text("시가: \(formattedNumber(priceInfo["stck_oprc"]))")
+                            Text("고가: \(formattedNumber(priceInfo["stck_hgpr"]))")
+                            Text("저가: \(formattedNumber(priceInfo["stck_lwpr"]))")
+                            Text("전일대비: \(formattedNumber(priceInfo["prdy_vrss"]))")
+                            Text("등락률: \(priceInfo["prdy_ctrt"] ?? "-")%")
+                            Text("누적거래량: \(formattedNumber(priceInfo["acml_vol"]))")
+                        }
+                        .font(.caption)
+                        .padding(.horizontal)
+                        .foregroundColor(.secondary)
+                    }
                 }
+                .padding(.horizontal)
+                .padding(.top, 4)
+                .frame(height: 130) // fixed height for betting area
             }
 
             if candles.isEmpty {
-                Text("로딩 중...").onAppear {
-                    fetchCandleData(for: stock.Code)
-                    fetchPriceData(for: stock.Code)
-                }
+                Text("로딩 중...")
+                    .onAppear {
+                        fetchCandleData(for: stock.Code)
+                        fetchPriceData(for: stock.Code)
+                        calculateBettingSize()
+                    }
             } else {
                 // onChange for show52Weeks: fetch data when toggled
                 EmptyView()
@@ -230,11 +251,17 @@ struct ChartsView: View {
                             }
                             .symbolSize(10)
                             .foregroundStyle(.red)
-                            .annotation(position: .topLeading) {
-                                Text("최고 \(Int(highest.high)), \(highest.date)")
-                                    .font(.caption)
-                                    .foregroundColor(.red)
-                                    .offset(x: 40)
+                            .annotation(position: .top) {
+                                VStack(spacing: 2) {
+                                    Text("최고 \(formattedNumber("\(Int(highest.high))"))")
+                                    Text("\(highest.date)")
+                                        .font(.system(size: 9))
+                                }
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                                .zIndex(1)
                             }
                         }
 
@@ -251,10 +278,16 @@ struct ChartsView: View {
                             .symbolSize(10)
                             .foregroundStyle(.blue)
                             .annotation(position: .bottomTrailing) {
-                                Text("최저 \(Int(lowest.low)), \(lowest.date)")
-                                    .font(.caption)
-                                    .foregroundColor(.blue)
-                                    .padding(.leading, -35)
+                                VStack(spacing: 2) {
+                                    Text("최저 \(formattedNumber("\(Int(lowest.low))"))")
+                                    Text("\(lowest.date)")
+                                        .font(.system(size: 9))
+                                }
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.leading, -35)
                             }
                         }
                     }
@@ -268,6 +301,8 @@ struct ChartsView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                         .rotationEffect(.degrees(45))
+                                        .multilineTextAlignment(.center)
+                                        .frame(maxWidth: .infinity, alignment: .center)
                                 }
                             }
                         }
@@ -287,15 +322,20 @@ struct ChartsView: View {
                     .padding(6)
                     .background(.ultraThinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 12)
-                    .padding(.leading, 20)
                 }
             }
+            // (bettingTextResult block moved above)
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .onChange(of: stock.Code, initial: false) { oldCode, newCode in
+            bettingTextResult = nil
             fetchCandleData(for: newCode)
             fetchPriceData(for: newCode)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                calculateBettingSize()
+            }
         }
     }
 
@@ -381,5 +421,30 @@ struct ChartsView: View {
     func formattedNumber(_ value: String?) -> String {
         guard let value = value, let number = Int(value) else { return value ?? "-" }
         return NumberFormatter.localizedString(from: NSNumber(value: number), number: .decimal)
+    }
+
+    private func calculateBettingSize() {
+        let capital = 50000000.0
+        let riskRatio = abs(appModel.maxLossRatio)
+        let atrPeriod = appModel.atrPeriod
+        let atr = 1000.0 // 예시 ATR 값
+        let entryPriceStr = priceInfo["stck_prpr"]?.replacingOccurrences(of: ",", with: "") ?? "13000"
+        let entryPrice = Double(entryPriceStr) ?? 13000
+        let stopLoss = entryPrice - (2 * atr)
+        let quantity = Int(floor((capital * riskRatio) / (atr * 2)))
+        let totalInvestment = Double(quantity) * entryPrice
+        let investmentRatio = capital > 0 ? totalInvestment / capital : 0
+
+        bettingTextResult = """
+        총자산: \(formattedNumber("\(Int(capital))"))
+        ATR 기간: \(atrPeriod)일
+        손실허용비율: \(-(riskRatio * 100))%
+        ATR 값: \(formattedNumber("\(Int(atr))"))
+        매수량: \(quantity)주
+        목표매수가: \(formattedNumber("\(Int(entryPrice))"))
+        손절가: \(formattedNumber("\(Int(stopLoss))"))
+        투입자금: \(formattedNumber("\(Int(totalInvestment))"))원
+        투입비중: \((investmentRatio * 100).formatted(.number.precision(.fractionLength(1))))%
+        """
     }
 }

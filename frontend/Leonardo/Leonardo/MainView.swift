@@ -17,12 +17,13 @@ struct MainView: View {
     @State private var selectedStock: StockItem? = nil
     @State private var selectedWatchStock: WatchStockItem? = nil
     @State private var selectedAssetTab: AssetDetailTab? = .summary
+    @State private var selectedSettingsTab: String? = nil
 
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedTab) {
                 Label("자산현황", systemImage: "wonsign.bank.building").tag(Tab.portfolioDummy)
-                Label("추천종목", systemImage: "list.bullet").tag(Tab.stocks)
+                Label("추천종목", systemImage: "hand.thumbsup").tag(Tab.stocks)
                 Label("관심종목", systemImage: "star").tag(Tab.watchlist)
                 Label("차트", systemImage: "chart.line.uptrend.xyaxis").tag(Tab.chart)
                 Label("포트폴리오", systemImage: "wallet.pass").tag(Tab.portfolio)
@@ -40,7 +41,11 @@ struct MainView: View {
             case .portfolio:
                 Text("Portfolio View")
             case .settings:
-                Text("Settings View")
+                List(selection: $selectedSettingsTab) {
+                    NavigationLink("베팅관련설정", value: "A")
+                    NavigationLink("B Style", value: "B")
+                }
+                .navigationTitle("설정")
             case .portfolioDummy:
                 List(selection: $selectedAssetTab) {
                     NavigationLink("총자산", value: AssetDetailTab.summary)
@@ -73,6 +78,8 @@ struct MainView: View {
                     Text("세부 정보를 선택하세요")
                         .foregroundStyle(.secondary)
                 }
+            case .chart:
+                Text("Chart View")
             case .portfolio:
                 Text("보유 종목 View")
             case .portfolioDummy:
@@ -91,9 +98,16 @@ struct MainView: View {
                     Text("세부 정보를 선택하세요")
                         .foregroundStyle(.secondary)
                 }
-            default:
-                Text("세부 정보를 선택하세요")
-                    .foregroundStyle(.secondary)
+            case .settings:
+                switch selectedSettingsTab {
+                case "A":
+                    BettingSettingsView()
+                case "B":
+                    Text("B Style View (더미)")
+                default:
+                    Text("설정 내용을 선택하세요")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

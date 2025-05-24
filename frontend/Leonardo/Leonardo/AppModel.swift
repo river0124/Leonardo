@@ -11,6 +11,33 @@ class AppModel: ObservableObject {
     @Published var watchlistCodes: [String] = []
     @Published var showWatchlistWarning: Bool = false
 
+    @Published var atrPeriod: Int = 20
+    @Published var maxLossRatio: Double = -0.01
+    @Published var totalAsset: Int = 0
+
+    struct Settings: Codable {
+        let atr_period: Int
+        let max_loss_ratio: Double
+    }
+
+    func loadSettings() {
+        guard let url = URL(string: "http://127.0.0.1:5051/settings") else { return }
+
+        URLSession.shared.dataTask(with: url) { data, _, error in
+            if let data = data {
+                do {
+                    let settings = try JSONDecoder().decode(Settings.self, from: data)
+                    DispatchQueue.main.async {
+                        self.atrPeriod = settings.atr_period
+                        self.maxLossRatio = settings.max_loss_ratio
+                    }
+                } catch {
+                    print("❌ 설정 디코딩 실패:", error)
+                }
+            }
+        }.resume()
+    }
+
     func fetchWatchlist() {
         guard let url = URL(string: "http://127.0.0.1:5051/watchlist") else { return }
 
