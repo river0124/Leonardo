@@ -152,5 +152,43 @@ def stockname():
             content_type='application/json; charset=utf-8'
         )
 
+
+# /holdings endpoint
+@app.route('/holdings', methods=['GET'])
+def holdings():
+    try:
+        df = api.get_holdings()
+        if df.empty:
+            return jsonify({"error": "No holdings found"}), 404
+
+        # 필요한 컬럼만 JSON으로 반환
+        df_filtered = df[[
+            "pdno", "prdt_name", "hldg_qty", "ord_psbl_qty", "pchs_avg_pric",
+            "prpr", "evlu_amt", "evlu_pfls_amt", "evlu_pfls_rt"
+        ]].rename(columns={
+            "pdno": "code",
+            "prdt_name": "name",
+            "hldg_qty": "quantity",
+            "ord_psbl_qty": "available_quantity",
+            "pchs_avg_pric": "avg_price",
+            "prpr": "current_price",
+            "evlu_amt": "evaluation_amount",
+            "evlu_pfls_amt": "profit_loss",
+            "evlu_pfls_rt": "profit_loss_rate"
+        })
+
+        numeric_columns = [
+            "quantity", "available_quantity", "avg_price",
+            "current_price", "evaluation_amount", "profit_loss", "profit_loss_rate"
+        ]
+        df_filtered[numeric_columns] = df_filtered[numeric_columns].apply(pd.to_numeric, errors='coerce')
+
+        return Response(
+            df_filtered.to_json(orient="records", force_ascii=False),
+            content_type='application/json; charset=utf-8'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051)

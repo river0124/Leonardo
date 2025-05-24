@@ -4,6 +4,7 @@
 # Python cache
 __pycache__/
 *.py[cod]
+*.pyc
 
 # Logs and runtime
 *.log
@@ -12,6 +13,7 @@ __pycache__/
 *.bak
 *.swp
 *.tmp
+logs/
 
 # IDE/editor
 .idea/
@@ -38,7 +40,6 @@ build/
 
 # Output caches
 cache/
-cache/*
 logs/
 
 # Project config
@@ -48,6 +49,4 @@ config.yaml
 *~
 *.bak
 *.tmp
-*.xcuserstate
-backend/token.json
 backend/token.json

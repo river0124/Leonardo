@@ -33,7 +33,7 @@ struct MainView: View {
             case .settings:
                 Text("Settings View")
             case .portfolioDummy:
-                EmptyView()
+                HoldingView()
             }
         } detail: {
             switch selectedTab {
@@ -60,7 +60,7 @@ struct MainView: View {
             case .portfolio:
                 Text("보유 종목 View")
             case .portfolioDummy:
-                EmptyView()
+                HoldingView()
             default:
                 Text("세부 정보를 선택하세요")
                     .foregroundStyle(.secondary)
