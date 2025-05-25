@@ -24,10 +24,6 @@ class StockViewModel: ObservableObject {
                 return
             }
 
-            if let raw = String(data: data, encoding: .utf8) {
-                print("📦 응답 JSON 원본:\n\(raw)")
-            }
-
             do {
                 let decoded = try JSONDecoder().decode([StockItem].self, from: data)
                 DispatchQueue.main.async {

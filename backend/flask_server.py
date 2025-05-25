@@ -1,30 +1,55 @@
 # flask_server.py
 import json
+import os
+import pandas as pd
 from flask import Flask, request, jsonify, Response
+
 from get_asset import get_total_asset
 from get_candle_data import get_candle_chart_data
 from watchlist_store import load_watchlist, add_code_to_watchlist, remove_code_from_watchlist
 from utils import KoreaInvestEnv, KoreaInvestAPI
-import yaml
-import pandas as pd
 from stock_name_finder import get_stock_name_by_code
-from settings_manager import save_settings
-import os
 
 DEBUG = 0  # Set to 1 to enable print, 0 to disable
 
-# YAML 설정 불러오기
-with open("/Users/hyungseoklee/Documents/Leonardo/backend/config.yaml", "r") as f:
-    cfg = yaml.safe_load(f)
+# 경로 설정
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_FILE = os.path.join(BASE_DIR, "cache", "settings.json")
+STOCK_LIST_CSV = os.path.join(BASE_DIR, "cache", "stock_list.csv")
 
-# 투자 환경 및 API 초기화
-env = KoreaInvestEnv(cfg)
-api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers())
+# 설정 불러오기
+def load_settings():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-stock_df = pd.read_csv("/Users/hyungseoklee/Documents/Leonardo/backend/cache/stock_list.csv", dtype=str)
+# 설정 저장
+def save_settings(settings_dict: dict):
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            existing = json.load(f)
+    else:
+        existing = {}
+
+    existing.update(settings_dict)
+
+    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(existing, f, indent=2, ensure_ascii=False)
 
 # Flask 앱 초기화
 app = Flask(__name__)
+
+# 초기 설정 및 API 객체 생성
+cfg = load_settings()
+if DEBUG:
+    print("🐞 cfg loaded:", cfg)
+
+env = KoreaInvestEnv(cfg)
+api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers())
+
+stock_df = pd.read_csv(STOCK_LIST_CSV, dtype=str)
 
 @app.route('/candle', methods=['GET'])
 def candle():
@@ -34,30 +59,24 @@ def candle():
 
     try:
         result = get_candle_chart_data(code)
-
         candles = result.get("candles", [])
         valid_candles = [c for c in candles if all(c.get(k) is not None and c.get(k) >= 0 for k in ['open', 'high', 'low', 'close'])]
-        if DEBUG: print("🛠 필터 전 캔들 수:", len(candles))
-        if DEBUG: print("🛠 필터 후 캔들 수:", len(valid_candles))
 
-        if not valid_candles:
-            return jsonify({"error": "No valid candle data"}), 500
-
-        result["candles"] = valid_candles
-
-        import json
         if DEBUG:
+            print("🛠 필터 전 캔들 수:", len(candles))
+            print("🛠 필터 후 캔들 수:", len(valid_candles))
             print("\n=== 서버 응답 데이터 ===")
             print("요청된 종목 코드:", code)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             print("========================\n")
 
+        result["candles"] = valid_candles
         return jsonify(result), 200
     except Exception as e:
-        if DEBUG: print(f"서버 에러 발생: {str(e)}")
+        if DEBUG:
+            print(f"서버 에러 발생: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# /asset endpoint
 @app.route('/asset', methods=['GET'])
 def asset():
     try:
@@ -68,11 +87,10 @@ def asset():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# /52주 신고가 endpoint
 @app.route("/high52", methods=["GET"])
 def high52():
     try:
-        with open("/Users/hyungseoklee/Documents/Leonardo/backend/cache/high52.json", encoding="utf-8") as f:
+        with open(os.path.join(BASE_DIR, "cache", "high52.json"), encoding="utf-8") as f:
             data = json.load(f)
         return jsonify(data), 200
     except Exception as e:
@@ -107,7 +125,6 @@ def get_price():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/watchlist", methods=["GET", "POST", "DELETE"])
 def watchlist():
     try:
@@ -131,67 +148,35 @@ def watchlist():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-# New endpoint to get stock name by code
 @app.route('/stockname', methods=['GET'])
 def stockname():
     code = request.args.get('code')
     if not code:
-        return Response(
-            json.dumps({"error": "Missing code parameter"}, ensure_ascii=False),
-            content_type='application/json; charset=utf-8'
-        )
+        return jsonify({"error": "Missing code parameter"}), 400
 
     name = get_stock_name_by_code(code)
     if name:
-        return Response(
-            json.dumps({"code": code, "name": name}, ensure_ascii=False),
-            content_type='application/json; charset=utf-8'
-        )
+        return jsonify({"code": code, "name": name})
     else:
-        return Response(
-            json.dumps({"error": "Stock name not found"}, ensure_ascii=False),
-            content_type='application/json; charset=utf-8'
-        )
+        return jsonify({"error": "Stock name not found"}), 404
 
+@app.route('/settings', methods=['GET', 'POST'])
+def settings():
+    if request.method == 'GET':
+        try:
+            return jsonify(load_settings()), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    elif request.method == 'POST':
+        try:
+            data = request.get_json()
+            if DEBUG:
+                print("📩 POST /settings 요청 수신:", data)
 
-# /holdings endpoint
-@app.route('/holdings', methods=['GET'])
-def holdings():
-    try:
-        df = api.get_holdings()
-        if df.empty:
-            return jsonify({"error": "No holdings found"}), 404
-
-        # 필요한 컬럼만 JSON으로 반환
-        df_filtered = df[[
-            "pdno", "prdt_name", "hldg_qty", "ord_psbl_qty", "pchs_avg_pric",
-            "prpr", "evlu_amt", "evlu_pfls_amt", "evlu_pfls_rt"
-        ]].rename(columns={
-            "pdno": "code",
-            "prdt_name": "name",
-            "hldg_qty": "quantity",
-            "ord_psbl_qty": "available_quantity",
-            "pchs_avg_pric": "avg_price",
-            "prpr": "current_price",
-            "evlu_amt": "evaluation_amount",
-            "evlu_pfls_amt": "profit_loss",
-            "evlu_pfls_rt": "profit_loss_rate"
-        })
-
-        numeric_columns = [
-            "quantity", "available_quantity", "avg_price",
-            "current_price", "evaluation_amount", "profit_loss", "profit_loss_rate"
-        ]
-        df_filtered[numeric_columns] = df_filtered[numeric_columns].apply(pd.to_numeric, errors='coerce')
-
-        return Response(
-            df_filtered.to_json(orient="records", force_ascii=False),
-            content_type='application/json; charset=utf-8'
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+            save_settings(data)
+            return jsonify({"message": "Settings saved successfully"}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
 # /holdings/detail endpoint
 @app.route('/holdings/detail', methods=['GET'])
@@ -217,7 +202,6 @@ def holdings_detail():
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # /total_asset/summary endpoint
 @app.route('/total_asset/summary', methods=['GET'])
@@ -245,36 +229,6 @@ def total_asset_summary():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-@app.route('/settings', methods=['GET', 'POST'])
-def settings():
-    if request.method == 'GET':
-        try:
-            cache_file = os.path.join("cache", "settings.json")
-            if not os.path.exists(cache_file):
-                return jsonify({"error": "Settings file not found"}), 404
-
-            with open(cache_file, "r", encoding="utf-8") as f:
-                settings = json.load(f)
-
-            return jsonify(settings), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
-    elif request.method == 'POST':
-        try:
-            data = request.get_json()
-            atr_period = data.get("atr_period")
-            max_loss_ratio = data.get("max_loss_ratio")
-
-            if atr_period is None or max_loss_ratio is None:
-                return jsonify({"error": "Missing atr_period or max_loss_ratio"}), 400
-
-            save_settings(atr_period, max_loss_ratio)
-            return jsonify({"message": "Settings saved successfully"}), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051)

@@ -340,7 +340,7 @@ struct ChartsView: View {
     }
 
     func fetchCandleData(for code: String) {
-        guard let url = URL(string: "http://192.168.50.221:5051/candle?code=\(code)") else {
+        guard let url = URL(string: "http://127.0.0.1:5051/candle?code=\(code)") else {
             print("❌ URL 생성 실패")
             return
         }

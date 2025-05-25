@@ -25,24 +25,24 @@ import pandas as pd
 class KoreaInvestEnv:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.custtype = cfg['custtype']
+        self.custtype = cfg.get('custtype', 'P')
         self.base_headers = {
             "content_Type": "application/json",
             "Accept": "text/plain",
             "charset": "UTF-8",
-            "User_Agent": cfg["my_agent"]
+            "User_Agent": cfg.get("my_agent", "")
         }
-        is_paper_trading = cfg["is_paper_trading"]
+        is_paper_trading = cfg.get("is_paper_trading", True)
         if is_paper_trading:
-            using_url = cfg["paper_url"]
-            api_key = cfg["paper_api_key"]
-            api_secret_key = cfg["paper_api_secret_key"]
-            account_num = cfg["paper_stock_account_number"]
+            using_url = cfg.get("paper_url", "")
+            api_key = cfg.get("paper_api_key", "")
+            api_secret_key = cfg.get("paper_api_secret_key", "")
+            account_num = cfg.get("paper_stock_account_number", "")
         else:
-            using_url = cfg["url"]
-            api_key = cfg["api_key"]
-            api_secret_key = cfg["api_secret_key"]
-            account_num = cfg["stock_account_number"]
+            using_url = cfg.get("url", "")
+            api_key = cfg.get("api_key", "")
+            api_secret_key = cfg.get("api_secret_key", "")
+            account_num = cfg.get("stock_account_number", "")
         websocket_approval_key = self.get_websocket_approval_key(using_url, api_key, api_secret_key)
         account_access_token = self.get_account_access_token(using_url, api_key, api_secret_key)
         self.base_headers["authorization"] = account_access_token
@@ -100,13 +100,13 @@ class KoreaInvestEnv:
 
 class KoreaInvestAPI:
     def __init__(self, cfg, base_headers):
-        self.custtype = cfg["custtype"]
+        self.custtype = cfg.get("custtype", "P")
         self._base_headers = base_headers
-        self.websocket_approval_key = cfg["websocket_approval_key"]
-        self.account_num = cfg["account_num"]
-        self.is_paper_trading = cfg["is_paper_trading"]
-        self.htsid = cfg["htsid"]
-        self.using_url = cfg["using_url"]
+        self.websocket_approval_key = cfg.get("websocket_approval_key", "")
+        self.account_num = cfg.get("account_num", "")
+        self.is_paper_trading = cfg.get("is_paper_trading", True)
+        self.htsid = cfg.get("htsid", "")
+        self.using_url = cfg.get("using_url", "")
 
     def set_order_hash_key(self, h, p):
         # 주문 API에서 사용할 hash key값을 받아 header에 설정해 주는 함수

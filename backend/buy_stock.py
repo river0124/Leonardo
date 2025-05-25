@@ -1,6 +1,6 @@
-import yaml
 import sys
 from utils import KoreaInvestEnv, KoreaInvestAPI
+from settings_manager import load_settings
 
 def main():
     if len(sys.argv) < 4:
@@ -23,8 +23,7 @@ def main():
         order_price = 0  # 시장가 주문 시 가격은 0
 
     # 설정 파일 로드 및 API 초기화
-    with open("./config.yaml", encoding="UTF-8") as f:
-        cfg = yaml.load(f, Loader=yaml.FullLoader)
+    cfg = load_settings()
 
     env_cls = KoreaInvestEnv(cfg)
     base_headers = env_cls.get_base_headers()
