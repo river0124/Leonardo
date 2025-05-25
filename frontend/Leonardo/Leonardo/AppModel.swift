@@ -21,9 +21,11 @@ class AppModel: ObservableObject {
     @Published var atrPeriod: Int = 20
     @Published var maxLossRatio: Double = -0.01
     @Published var totalAsset: Int = 0
+    @Published var isMarketOrder: Bool = true
 
     init() {
         loadStockList()
+        loadTotalAssetFromSummary()  // ✅ Load total asset on app start
     }
 
     struct Settings: Codable {
@@ -41,6 +43,7 @@ class AppModel: ObservableObject {
                     DispatchQueue.main.async {
                         self.atrPeriod = settings.atr_period
                         self.maxLossRatio = settings.max_loss_ratio
+                        // self.totalAsset = settings.total_asset
                     }
                 } catch {
                     print("❌ 설정 디코딩 실패:", error)
@@ -123,6 +126,28 @@ class AppModel: ObservableObject {
                 }
             } else if let error = error {
                 print("❌ Failed to fetch stock_list:", error.localizedDescription)
+            }
+        }.resume()
+    }
+    
+    func loadTotalAssetFromSummary() {
+        guard let url = URL(string: "http://127.0.0.1:5051/total_asset/summary") else { return }
+
+        URLSession.shared.dataTask(with: url) { data, _, error in
+            if let data = data {
+                do {
+                    let summary = try JSONDecoder().decode([String: String].self, from: data)
+                    if let amountString = summary["총평가금액"],
+                       let amount = Int(amountString.replacingOccurrences(of: ",", with: "")) {
+                        DispatchQueue.main.async {
+                            self.totalAsset = amount
+                        }
+                    }
+                } catch {
+                    print("❌ 총평가금액 디코딩 실패:", error)
+                }
+            } else if let error = error {
+                print("❌ 총평가금액 요청 실패:", error.localizedDescription)
             }
         }.resume()
     }

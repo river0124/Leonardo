@@ -27,6 +27,10 @@ struct ChartsView: View {
     @State private var show52Weeks = false
     @State private var priceInfo: [String: String] = [:]
     @State private var bettingTextResult: String? = nil
+    @State private var calculatedQuantity: Int = 0
+    @State private var showBuyConfirmation = false
+    @State private var pendingBuyInfo: (entryPrice: Int, quantity: Int, orderType: String)? = nil
+    @State private var alertMessage: String? = nil
     private var isStarred: Bool {
         appModel.watchlistCodes.contains(stock.Code)
     }
@@ -41,6 +45,7 @@ struct ChartsView: View {
     }
 
     var body: some View {
+        ZStack {
         VStack(alignment: .leading) {
             HStack(alignment: .center) {
                 Text("\(stock.Name)(\(stock.Code))")
@@ -325,6 +330,44 @@ struct ChartsView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 12)
                 }
+                // 매수 버튼 및 시장가/지정가 토글
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        guard let entryPriceStr = priceInfo["stck_prpr"]?.replacingOccurrences(of: ",", with: ""),
+                              let entryPrice = Double(entryPriceStr) else {
+                            print("❌ 현재가 변환 실패")
+                            return
+                        }
+                        let orderType = appModel.isMarketOrder ? "03" : "00"
+                        let quantity = calculatedQuantity
+                        pendingBuyInfo = (entryPrice: Int(entryPrice), quantity: quantity, orderType: orderType)
+                        showBuyConfirmation = true
+                    }) {
+                        Text("매수")
+                            .font(.headline)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                    }
+                    Text("지정가")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Toggle(isOn:$appModel.isMarketOrder) {
+                        EmptyView()
+                    }
+                    .labelsHidden()
+                    .toggleStyle(SwitchToggleStyle(tint: .blue))
+
+                    Text("시장가")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 10)
             }
             // (bettingTextResult block moved above)
         }
@@ -336,6 +379,84 @@ struct ChartsView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 calculateBettingSize()
             }
+        }
+        .onChange(of: appModel.maxLossRatio) { _, _ in
+            calculateBettingSize()
+        }
+        .onChange(of: appModel.atrPeriod) { _, _ in
+            calculateBettingSize()
+        }
+        .onChange(of: appModel.totalAsset) { _, _ in
+            calculateBettingSize()
+        }
+        .alert("매수를 하시겠습니까?", isPresented: $showBuyConfirmation) {
+            Button("확인") {
+                guard let info = pendingBuyInfo else { return }
+                let url = URL(string: "http://127.0.0.1:5051/buy")!
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+                let payload: [String: Any] = [
+                    "stock_code": stock.Code,
+                    "price": info.entryPrice,
+                    "quantity": info.quantity,
+                    "order_type": info.orderType
+                ]
+
+                do {
+                    request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+                } catch {
+                    print("❌ JSON 직렬화 실패: \(error)")
+                    return
+                }
+
+                URLSession.shared.dataTask(with: request) { data, response, error in
+                    if let error = error {
+                        print("❌ 매수 요청 에러: \(error)")
+                        return
+                    }
+                    if let data = data,
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let message = json["message"] as? String {
+                        DispatchQueue.main.async {
+                            alertMessage = message
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                alertMessage = nil
+                            }
+                        }
+                    }
+                }.resume()
+            }
+            Button("취소") { }
+        } message: {
+            if let info = pendingBuyInfo {
+                Text("""
+종목명: \(stock.Name)
+종목코드: \(stock.Code)
+주문수량: \(info.quantity)
+목표매수가: \(formattedNumber("\(info.entryPrice)"))
+주문유형: \(info.orderType == "03" ? "시장가 (03)" : "지정가 (00)")
+""")
+            } else {
+                Text("주문 정보를 불러올 수 없습니다.")
+            }
+        }
+        // Alert message view at bottom
+        if let message = alertMessage {
+            VStack {
+                Spacer()
+                Text(message)
+                    .font(.system(size: 10))
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.black.opacity(0.4))
+                    .foregroundColor(.white)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .animation(.easeInOut, value: alertMessage)
+            }
+        }
         }
     }
 
@@ -375,6 +496,7 @@ struct ChartsView: View {
                     }
                     DispatchQueue.main.async {
                         self.candles = show52Weeks ? filteredCandles : Array(filteredCandles.suffix(130))
+                        self.calculateBettingSize()
                     }
                 } else {
                     print("❌ JSON 구조 오류: 'candles' 키가 없음")
@@ -424,22 +546,38 @@ struct ChartsView: View {
     }
 
     private func calculateBettingSize() {
-        let capital = 50000000.0
+        guard appModel.totalAsset > 0 else {
+            bettingTextResult = "총자산이 설정되지 않았습니다."
+            return
+        }
+
         let riskRatio = abs(appModel.maxLossRatio)
         let atrPeriod = appModel.atrPeriod
-        let atr = 1000.0 // 예시 ATR 값
+        let atrs: [Double] = {
+            let candleSet = candles.suffix(atrPeriod + 1)
+            return candleSet.enumerated().compactMap { index, candle in
+                guard index < candleSet.count, index > 0 else { return nil }
+                let prev = candleSet[candleSet.index(candleSet.startIndex, offsetBy: index - 1)]
+                let highLow = candle.high - candle.low
+                let highPrevClose = abs(candle.high - prev.close)
+                let lowPrevClose = abs(candle.low - prev.close)
+                return max(highLow, highPrevClose, lowPrevClose)
+            }
+        }()
+        let atr = atrs.isEmpty ? 1000.0 : atrs.reduce(0, +) / Double(atrs.count)
         let entryPriceStr = priceInfo["stck_prpr"]?.replacingOccurrences(of: ",", with: "") ?? "13000"
         let entryPrice = Double(entryPriceStr) ?? 13000
         let stopLoss = entryPrice - (2 * atr)
-        let quantity = Int(floor((capital * riskRatio) / (atr * 2)))
+        let quantity = Int(floor((Double(appModel.totalAsset) * riskRatio) / (atr * 2)))
+        self.calculatedQuantity = quantity
         let totalInvestment = Double(quantity) * entryPrice
-        let investmentRatio = capital > 0 ? totalInvestment / capital : 0
+        let investmentRatio = Double(appModel.totalAsset) > 0 ? totalInvestment / Double(appModel.totalAsset) : 0
 
         bettingTextResult = """
-        총자산: \(formattedNumber("\(Int(capital))"))
-        ATR 기간: \(atrPeriod)일
-        손실허용비율: \(-(riskRatio * 100))%
-        ATR 값: \(formattedNumber("\(Int(atr))"))
+        총자산: \(formattedNumber("\(appModel.totalAsset)"))
+        ATR 기간: \(appModel.atrPeriod)일
+        손실허용비율: \((riskRatio * 100).formatted(.number.precision(.fractionLength(1))))%
+        ATR 값: \(formattedNumber("\(Int(atr.rounded(.down)))"))
         매수량: \(quantity)주
         목표매수가: \(formattedNumber("\(Int(entryPrice))"))
         손절가: \(formattedNumber("\(Int(stopLoss))"))

@@ -164,7 +164,7 @@ class KoreaInvestAPI:
             return None
         else:
             t1.print_error()
-            return None
+            return t1
 
     def do_cancel(self, order_no, order_qty, order_price="01", order_branch= "06010", prd_code="01", order_dv="00", cncl_dv= "02", qty_all_yn="Y"):
         return self._do_cancel_revise(order_no, order_branch, order_qty, order_price, prd_code, order_dv, cncl_dv, qty_all_yn)

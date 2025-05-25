@@ -243,5 +243,45 @@ def total_asset_summary():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/buy', methods=['POST'])
+def buy_stock():
+    try:
+        data = request.get_json()
+        stock_code = data.get("stock_code")
+        quantity = data.get("quantity")
+        price = data.get("price")
+        order_type = data.get("order_type")
+
+        if not stock_code or quantity is None or price is None or order_type is None:
+            return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+        response = api.do_buy(stock_code, quantity, price, order_type)
+
+        if response is not None:
+            if not response.is_ok():
+                message = response.get_error_message()
+                code = response.get_error_code()
+                return jsonify({
+                    "success": False,
+                    "code": code,
+                    "message": message
+                }), 200
+            return jsonify({
+                "success": True,
+                "message": "매수 요청이 정상적으로 처리되었습니다.",
+                "data": response.get_body().__dict__
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "서버 오류: 응답이 없습니다."
+            }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"서버 예외: {str(e)}"
+        }), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5051)
