@@ -6,7 +6,14 @@
 //
 import Foundation
 
+struct StockInfo: Identifiable, Codable {
+    var id: String { code }
+    let name: String
+    let code: String
+}
+
 class AppModel: ObservableObject {
+    @Published var stockList: [StockInfo] = []
     @Published var stockCache: [String: WatchStockItem] = [:]
     @Published var watchlistCodes: [String] = []
     @Published var showWatchlistWarning: Bool = false
@@ -14,6 +21,10 @@ class AppModel: ObservableObject {
     @Published var atrPeriod: Int = 20
     @Published var maxLossRatio: Double = -0.01
     @Published var totalAsset: Int = 0
+
+    init() {
+        loadStockList()
+    }
 
     struct Settings: Codable {
         let atr_period: Int
@@ -95,5 +106,24 @@ class AppModel: ObservableObject {
         } catch {
             print("❌ removeFromWatchlist 에러: \(error)")
         }
+    }
+
+    private func loadStockList() {
+        guard let url = URL(string: "http://127.0.0.1:5051/stock/list") else { return }
+
+        URLSession.shared.dataTask(with: url) { data, _, error in
+            if let data = data {
+                do {
+                    let list = try JSONDecoder().decode([StockInfo].self, from: data)
+                    DispatchQueue.main.async {
+                        self.stockList = list
+                    }
+                } catch {
+                    print("❌ Failed to decode stock_list:", error)
+                }
+            } else if let error = error {
+                print("❌ Failed to fetch stock_list:", error.localizedDescription)
+            }
+        }.resume()
     }
 }

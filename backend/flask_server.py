@@ -203,6 +203,19 @@ def holdings_detail():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/stock/list", methods=["GET"])
+def get_stock_list():
+    try:
+        csv_path = os.path.join(BASE_DIR, "cache", "stock_list.csv")
+        df = pd.read_csv(csv_path, dtype=str)
+        stock_list = df[["Code", "Name"]].rename(columns={"Code": "code", "Name": "name"}).to_dict(orient="records")
+        return Response(
+            json.dumps(stock_list, ensure_ascii=False),
+            content_type='application/json; charset=utf-8'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # /total_asset/summary endpoint
 @app.route('/total_asset/summary', methods=['GET'])
 def total_asset_summary():

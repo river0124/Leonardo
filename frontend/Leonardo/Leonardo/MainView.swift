@@ -25,7 +25,7 @@ struct MainView: View {
                 Label("자산현황", systemImage: "wonsign.bank.building").tag(Tab.portfolioDummy)
                 Label("추천종목", systemImage: "hand.thumbsup").tag(Tab.stocks)
                 Label("관심종목", systemImage: "star").tag(Tab.watchlist)
-                Label("차트", systemImage: "chart.line.uptrend.xyaxis").tag(Tab.chart)
+                Label("종목검색", systemImage: "magnifyingglass").tag(Tab.chart)
                 Label("포트폴리오", systemImage: "wallet.pass").tag(Tab.portfolio)
                 Label("설정", systemImage: "gearshape").tag(Tab.settings)
             }
@@ -37,7 +37,7 @@ struct MainView: View {
             case .watchlist:
                 WatchListView(selectedStock: $selectedWatchStock)
             case .chart:
-                Text("Chart View")
+                SearchView(selectedStock: $selectedStock)
             case .portfolio:
                 Text("Portfolio View")
             case .settings:
@@ -79,7 +79,12 @@ struct MainView: View {
                         .foregroundStyle(.secondary)
                 }
             case .chart:
-                Text("Chart View")
+                if let stock = selectedStock {
+                    ChartsView(stock: stock)
+                } else {
+                    Text("세부 정보를 선택하세요")
+                        .foregroundStyle(.secondary)
+                }
             case .portfolio:
                 Text("보유 종목 View")
             case .portfolioDummy:
