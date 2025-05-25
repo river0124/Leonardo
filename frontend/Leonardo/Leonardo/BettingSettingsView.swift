@@ -34,9 +34,10 @@ struct BettingSettingsView: View {
                 }
             }
 
-            HStack {
+            HStack(alignment: .center, spacing: 10) {
                 Text("총자산 대비 손실 허용 비율:")
                     .frame(width: 200, alignment: .leading)
+
                 Menu {
                     ForEach(lossOptions, id: \.self) { value in
                         Button(action: {
@@ -53,6 +54,10 @@ struct BettingSettingsView: View {
                         .cornerRadius(5)
                         .fixedSize()
                 }
+                .frame(alignment: .leading)
+                .layoutPriority(1)
+
+                Spacer()
             }
 
             HStack {

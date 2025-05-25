@@ -42,8 +42,8 @@ struct MainView: View {
                 Text("Portfolio View")
             case .settings:
                 List(selection: $selectedSettingsTab) {
+                    NavigationLink("일반설정", value: "B")
                     NavigationLink("베팅관련설정", value: "A")
-                    NavigationLink("B Style", value: "B")
                 }
                 .navigationTitle("설정")
             case .portfolioDummy:
@@ -108,7 +108,7 @@ struct MainView: View {
                 case "A":
                     BettingSettingsView()
                 case "B":
-                    Text("B Style View (더미)")
+                    GeneralSettingView()
                 default:
                     Text("설정 내용을 선택하세요")
                         .foregroundStyle(.secondary)

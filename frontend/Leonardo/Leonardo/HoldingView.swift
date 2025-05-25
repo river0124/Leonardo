@@ -116,9 +116,17 @@ struct HoldingView: View {
                         holdings = result
                     }
                 }
-                if let summary = json?["summary"] as? [String: String] {
+                if let summary = json?["summary"] as? [String: Any] {
+                    var result: [String: String] = [:]
+                    for (key, value) in summary {
+                        if let stringValue = value as? String {
+                            result[key] = stringValue
+                        } else {
+                            result[key] = "\(value)"
+                        }
+                    }
                     DispatchQueue.main.async {
-                        depositSummary = summary
+                        depositSummary = result
                     }
                 }
             } catch {
