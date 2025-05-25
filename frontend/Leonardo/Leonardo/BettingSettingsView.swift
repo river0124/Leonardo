@@ -66,7 +66,7 @@ struct BettingSettingsView: View {
                 }
                 .disabled(!isModified)
                 .tint(isModified ? .blue : .gray)
-                .padding(.top, 10)
+                //.padding(.top, 10)
             }
 
             Spacer()

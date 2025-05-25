@@ -345,12 +345,7 @@ struct ChartsView: View {
                         showBuyConfirmation = true
                     }) {
                         Text("매수")
-                            .font(.headline)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
+                        
                     }
                     Text("지정가")
                         .font(.caption)
@@ -359,8 +354,9 @@ struct ChartsView: View {
                     Toggle(isOn:$appModel.isMarketOrder) {
                         EmptyView()
                     }
+                    .toggleStyle(SwitchToggleStyle(tint: .gray))
                     .labelsHidden()
-                    .toggleStyle(SwitchToggleStyle(tint: .blue))
+                    .scaleEffect(0.8)
 
                     Text("시장가")
                         .font(.caption)

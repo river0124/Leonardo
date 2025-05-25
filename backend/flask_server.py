@@ -228,12 +228,12 @@ def settings():
                 print("📩 POST /settings 요청 수신:", data)
 
             save_settings(data)
-            # 설정 변경 후 API 객체 등을 다시 초기화해야 할 수도 있습니다.
-            # global cfg, env, api
-            # cfg = load_settings()
-            # env = KoreaInvestEnv(cfg)
-            # api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers())
-            # app.logger.info("Settings updated and API re-initialized.")
+            # 설정 변경 후 API 객체 재초기화
+            global cfg, env, api
+            cfg = load_settings()
+            env = KoreaInvestEnv(cfg)
+            api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers())
+            app.logger.info("Settings updated and API re-initialized.")
             return jsonify({"message": "Settings saved successfully"}), 200
         except Exception as e:
             app.logger.error(f"Error in POST /settings: {str(e)}", exc_info=True)

@@ -13,6 +13,7 @@ struct StockInfo: Identifiable, Codable {
 }
 
 class AppModel: ObservableObject {
+    static let shared = AppModel()
     @Published var stockList: [StockInfo] = []
     @Published var stockCache: [String: WatchStockItem] = [:]
     @Published var watchlistCodes: [String] = []
@@ -22,15 +23,19 @@ class AppModel: ObservableObject {
     @Published var maxLossRatio: Double = -0.01
     @Published var totalAsset: Int = 0
     @Published var isMarketOrder: Bool = true
+    @Published var isPaperTrading: Bool = true
+    @Published var isSettingsLoaded: Bool = false
 
     init() {
         loadStockList()
         loadTotalAssetFromSummary()  // ✅ Load total asset on app start
+        loadSettings()
     }
 
     struct Settings: Codable {
         let atr_period: Int
         let max_loss_ratio: Double
+        let is_paper_trading: Bool
     }
 
     func loadSettings() {
@@ -40,10 +45,12 @@ class AppModel: ObservableObject {
             if let data = data {
                 do {
                     let settings = try JSONDecoder().decode(Settings.self, from: data)
+                    print("🔄 설정값 확인 - is_paper_trading:", settings.is_paper_trading)
                     DispatchQueue.main.async {
                         self.atrPeriod = settings.atr_period
                         self.maxLossRatio = settings.max_loss_ratio
-                        // self.totalAsset = settings.total_asset
+                        self.isPaperTrading = settings.is_paper_trading
+                        self.isSettingsLoaded = true
                     }
                 } catch {
                     print("❌ 설정 디코딩 실패:", error)
@@ -111,7 +118,7 @@ class AppModel: ObservableObject {
         }
     }
 
-    private func loadStockList() {
+    func loadStockList() {
         guard let url = URL(string: "http://127.0.0.1:5051/stock/list") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, error in
@@ -150,5 +157,8 @@ class AppModel: ObservableObject {
                 print("❌ 총평가금액 요청 실패:", error.localizedDescription)
             }
         }.resume()
+    }
+    func loadWatchlist() {
+        fetchWatchlist()
     }
 }
