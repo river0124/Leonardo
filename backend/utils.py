@@ -75,7 +75,8 @@ class KoreaInvestEnv:
             "appsecret": api_secret_key
         }
         url = f'{request_base_url}/oauth2/tokenP'
-        res = requests.post(url, data=json.dumps(p), headers=self.base_headers)
+        # Use minimal headers for token request
+        res = requests.post(url, data=json.dumps(p), headers={"content-type": "application/json"})
         res.raise_for_status()
         my_token = res.json()["access_token"]
         bearer_token = f"Bearer {my_token}"
@@ -250,9 +251,29 @@ class KoreaInvestAPI:
                 return APIResponse(res)
             else:
                 logger.info(f"Error Code : {res.status_code} | {res.text}")
+                # Detect token expiration (EGW00123) and retry with refreshed token
+                if "EGW00123" in res.text:
+                    logger.info("🔁 만료된 토큰 감지됨 → 토큰 재발급 시도")
+                    from utils import KoreaInvestEnv
+                    env = KoreaInvestEnv(self.get_env_config())
+                    self._base_headers = env.get_base_headers()
+                    return self._url_fetch(api_url, tr_id, params, is_post_request, use_hash)
                 return None
         except Exception as e:
             logger.info(f"URL exception: {e}")
+
+
+    def get_env_config(self):
+        return {
+            "custtype": self.custtype,
+            "websocket_approval_key": self.websocket_approval_key,
+            "account_num": self.account_num,
+            "is_paper_trading": self.is_paper_trading,
+            "htsid": self.htsid,
+            "using_url": self.using_url,
+            "api_key": self._base_headers.get("appkey", ""),
+            "api_secret_key": self._base_headers.get("appsecret", "")
+        }
 
     def do_cancel_all(self, skip_codes=[]):
         tdf = self.get_orders()

@@ -32,6 +32,8 @@ struct BettingSettingsView: View {
                 Stepper(value: $draftAtrPeriod, in: 1...60) {
                     Text("\(draftAtrPeriod)일")
                 }
+                
+                Spacer()
             }
 
             HStack(alignment: .center, spacing: 10) {
@@ -48,19 +50,13 @@ struct BettingSettingsView: View {
                     }
                 } label: {
                     Text(String(format: "%.1f%%", draftMaxLossRatio * 100))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.gray.opacity(0.2))
-                        .cornerRadius(5)
-                        .fixedSize()
+                        .frame(width: 60, alignment: .leading)
                 }
-                .frame(alignment: .leading)
-                .layoutPriority(1)
-
-                Spacer()
+                .menuStyle(.button)
             }
 
             HStack {
+                Spacer()
                 Button("저장") {
                     saveSettings()
                 }

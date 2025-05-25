@@ -52,7 +52,7 @@ struct StockListView: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-            Text("52주 신고가 종목: \(viewModel.stocks.count) 종목")
+            Text("52주 신고가 종목: \(viewModel.stocks.count)종목")
                 .font(.headline)
                 .padding(.horizontal)
 

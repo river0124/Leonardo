@@ -30,9 +30,9 @@ struct SearchView: View {
                         showChart = true
                     }
                 })
-                    .padding(10)
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
+//                    .padding(10)
+//                    .background(Color.gray.opacity(0.1))
+//                    .cornerRadius(8)
 
             }
             .padding([.horizontal, .top])

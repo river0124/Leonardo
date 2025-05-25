@@ -3,6 +3,7 @@ import json
 import os
 import pandas as pd
 from flask import Flask, request, jsonify, Response
+from cryptography.fernet import Fernet
 # import logging # app.logger.setLevel을 사용하려면 필요
 
 from get_asset import get_total_asset
@@ -13,11 +14,22 @@ from stock_name_finder import get_stock_name_by_code
 
 DEBUG = 0  # Set to 1 to enable print, 0 to disable
 
-# 경로 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
-SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")  # 변경: 변수명 일관성 및 명확성
+SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
 STOCK_LIST_CSV = os.path.join(CACHE_DIR, "stock_list.csv")
+
+# Fernet encryption setup
+FERNET_KEY_FILE = os.path.join(CACHE_DIR, "key.secret")
+if os.path.exists(FERNET_KEY_FILE):
+    with open(FERNET_KEY_FILE, "rb") as f:
+        FERNET_KEY = f.read()
+else:
+    FERNET_KEY = Fernet.generate_key()
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(FERNET_KEY_FILE, "wb") as f:
+        f.write(FERNET_KEY)
+fernet = Fernet(FERNET_KEY)
 
 # Flask 앱 초기화
 app = Flask(__name__)
@@ -34,18 +46,28 @@ def load_settings():
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                settings = json.load(f)
+            # Decrypt sensitive fields
+            for key in ["api_key", "access_token"]:
+                if key in settings and isinstance(settings[key], str):
+                    try:
+                        settings[key] = fernet.decrypt(settings[key].encode()).decode()
+                    except Exception:
+                        pass  # If not decryptable, leave as is
+            return settings
         except json.JSONDecodeError:
             app.logger.warning(f"Warning: Could not decode JSON from {SETTINGS_FILE}. Returning empty settings.")
             return {}
     return {}
 
-
 # 설정 저장
 def save_settings(settings_dict: dict):
     current_settings = load_settings()
+    # Encrypt sensitive fields
+    for key in ["api_key", "access_token"]:
+        if key in settings_dict and isinstance(settings_dict[key], str):
+            settings_dict[key] = fernet.encrypt(settings_dict[key].encode()).decode()
     current_settings.update(settings_dict)
-
     os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(current_settings, f, indent=2, ensure_ascii=False)

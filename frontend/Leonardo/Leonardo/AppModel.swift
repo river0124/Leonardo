@@ -45,7 +45,6 @@ class AppModel: ObservableObject {
             if let data = data {
                 do {
                     let settings = try JSONDecoder().decode(Settings.self, from: data)
-                    print("🔄 설정값 확인 - is_paper_trading:", settings.is_paper_trading)
                     DispatchQueue.main.async {
                         self.atrPeriod = settings.atr_period
                         self.maxLossRatio = settings.max_loss_ratio

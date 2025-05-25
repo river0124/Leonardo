@@ -34,10 +34,13 @@ struct MainView: View {
             switch selectedTab {
             case .stocks:
                 StockListView(selectedStock: $selectedStock)
+                    .navigationTitle("추천종목")
             case .watchlist:
                 WatchListView(selectedStock: $selectedWatchStock)
+                    .navigationTitle("관심종목")
             case .chart:
                 SearchView(selectedStock: $selectedStock)
+                    .navigationTitle("종목검색")
             case .portfolio:
                 Text("Portfolio View")
             case .settings:

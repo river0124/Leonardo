@@ -13,7 +13,7 @@ struct WatchListView: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-                Text("주시 종목: \(appModel.watchlistCodes.count) 종목")
+                Text("주시 종목: \(appModel.watchlistCodes.count)종목")
                     .font(.headline)
                     .padding(.horizontal)
             
