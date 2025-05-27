@@ -52,7 +52,8 @@ struct HoldingView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading) {
+        HStack {
+            VStack(alignment: .leading) {
             Text("보유 종목 (\(holdings.count)개)")
                 .font(.title2)
                 .padding()
@@ -68,56 +69,59 @@ struct HoldingView: View {
                 .padding()
             }
 
-            List(holdings) { item in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("종목명: \(item.name) (\(item.code))")
-                        .font(.headline)
-                    HStack {
-                        Text("보유수량: \(formatNumber(item.quantity))")
-                        Text("주문가능수량: \(formatNumber(item.availableQuantity))")
+            if holdings.isEmpty {
+                Text("보유 종목이 없습니다.")
+                    .padding()
+                    .foregroundColor(.gray)
+            } else {
+                List(holdings) { item in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("종목명: \(item.name) (\(item.code))")
+                            .font(.headline)
+                        HStack {
+                            Text("보유수량: \(formatNumber(item.quantity))")
+                            Text("주문가능수량: \(formatNumber(item.availableQuantity))")
+                        }
+                        HStack {
+                            Text("매입평균가격: \(formatNumber(item.avgPrice))")
+                            Text("매입금액: \(formatNumber(item.pchsAmt))")
+                        }
+                        HStack {
+                            Text("현재가: \(formatNumber(item.currentPrice))")
+                            Text("평가금액: \(formatNumber(item.evaluationAmount))")
+                        }
+                        HStack {
+                            Text("평가손익금액: \(formatNumber(item.profitLoss))")
+                            Text("평가손익률: \(formatPercent(item.profitLossRate))")
+                        }
+                        HStack {
+                            Text("평가수익률(정밀): \(formatPercent(item.evluErngRt, decimals: 4))")
+                            Text("전일대비등락률: \(formatPercent(item.flttRt))")
+                        }
+                        .foregroundColor((Int(item.profitLoss ?? "0") ?? 0) >= 0 ? .red : .blue)
+                        .font(.footnote)
                     }
-                    HStack {
-                        Text("매입평균가격: \(formatNumber(item.avgPrice))")
-                        Text("매입금액: \(formatNumber(item.pchsAmt))")
-                    }
-                    HStack {
-                        Text("현재가: \(formatNumber(item.currentPrice))")
-                        Text("평가금액: \(formatNumber(item.evaluationAmount))")
-                    }
-                    HStack {
-                        Text("평가손익금액: \(formatNumber(item.profitLoss))")
-                        Text("평가손익률: \(formatPercent(item.profitLossRate))")
-                    }
-                    HStack {
-                        Text("평가수익률(정밀): \(formatPercent(item.evluErngRt, decimals: 4))")
-                        Text("전일대비등락률: \(formatPercent(item.flttRt))")
-                    }
-                    .foregroundColor((Int(item.profitLoss ?? "0") ?? 0) >= 0 ? .red : .blue)
-                    .font(.footnote)
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
             }
+            }
+            Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
             fetchHoldings()
 
-            guard let marketStatusURL = URL(string: "http://127.0.0.1:5051/market/is_open") else { return }
-
-            URLSession.shared.dataTask(with: marketStatusURL) { data, _, _ in
+            // Check market status before setting up timer
+            guard let statusURL = URL(string: "http://127.0.0.1:5051/market/is_open") else { return }
+            URLSession.shared.dataTask(with: statusURL) { data, _, _ in
                 guard let data = data else { return }
-                do {
-                    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                    if let isMarketOpen = json?["is_market_open"] as? Bool, isMarketOpen {
-                        DispatchQueue.main.async {
-                            timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-                                fetchHoldings()
-                            }
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let isOpen = json["market_open"] as? Bool, isOpen == true {
+                    DispatchQueue.main.async {
+                        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+                            fetchHoldings()
                         }
-                    } else {
-                        print("📌 시장이 열리지 않았습니다. 리프레시 비활성화")
                     }
-                } catch {
-                    print("❌ 시장 개장 여부 확인 실패: \(error)")
                 }
             }.resume()
         }

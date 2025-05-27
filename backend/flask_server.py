@@ -1,5 +1,6 @@
 # flask_server.py
 import json
+import datetime
 import os
 import pandas as pd
 from flask import Flask, request, jsonify, Response
@@ -65,16 +66,18 @@ def load_settings():
 # Helper function for saving settings (wraps original logic)
 def save_settings_to_file(settings_dict: dict):
     current_settings = load_settings()
-    # Encrypt sensitive fields
+
+    # 민감 정보 암호화
     for key in ["api_key", "access_token"]:
         if key in settings_dict and isinstance(settings_dict[key], str):
             settings_dict[key] = fernet.encrypt(settings_dict[key].encode()).decode()
-    if "is_paper_trading" in settings_dict:
-        current_settings["is_paper_trading"] = settings_dict["is_paper_trading"]
-    current_settings.update(settings_dict)
+
+    # 기존 설정 유지하며 덮어쓰기 (is_paper_trading만 따로 처리하지 않음)
+    merged_settings = {**current_settings, **settings_dict}
+
     os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(current_settings, f, indent=2, ensure_ascii=False)
+        json.dump(merged_settings, f, indent=2, ensure_ascii=False)
 
 
 # 초기 설정 및 API 객체 생성
@@ -302,7 +305,8 @@ def holdings_detail():
 
         return jsonify({
             "stocks": stocks_list,
-            "summary": summary_data
+            "summary": summary_data,
+            "is_empty": len(stocks_list) == 0
         }), 200
     except Exception as e:
         app.logger.error(f"Error in /holdings/detail: {str(e)}", exc_info=True)
@@ -493,24 +497,32 @@ def sell_stock():
 @app.route("/market/is_open", methods=["GET"])
 def is_market_open():
     try:
-        import datetime
-        today = datetime.date.today()
+        now = datetime.datetime.now()
+        today = now.date()
         weekday = today.weekday()  # 0: Monday ~ 6: Sunday
+
         if weekday >= 5:
             return jsonify({"market_open": False, "reason": "Weekend"}), 200
 
         holidays_path = os.path.join(CACHE_DIR, "holidays.csv")
-        if not os.path.exists(holidays_path):
-            app.logger.warning("holidays.csv not found.")
-            return jsonify({"market_open": True, "warning": "holidays.csv not found"}), 200
+        if os.path.exists(holidays_path):
+            holidays_df = pd.read_csv(holidays_path, dtype=str)
+            if "날짜" not in holidays_df.columns:
+                return jsonify({"market_open": False, "error": "holidays.csv에 '날짜' 컬럼 없음"}), 500
 
-        holidays_df = pd.read_csv(holidays_path, dtype=str)
-        holiday_dates = set(holidays_df["date"].tolist())
-        today_str = today.strftime("%Y-%m-%d")
-        if today_str in holiday_dates:
-            return jsonify({"market_open": False, "reason": "Holiday"}), 200
+            holiday_dates = set(pd.to_datetime(holidays_df["날짜"], format="%Y%m%d").dt.strftime("%Y-%m-%d").tolist())
+            if today.strftime("%Y-%m-%d") in holiday_dates:
+                return jsonify({"market_open": False, "reason": "Holiday"}), 200
+
+        # ✅ 시간 조건 확장: 08:40 ~ 15:31 사이만 리프레시 허용
+        market_refresh_start = now.replace(hour=8, minute=40, second=0, microsecond=0)
+        market_refresh_end = now.replace(hour=15, minute=31, second=0, microsecond=0)
+
+        if not (market_refresh_start <= now <= market_refresh_end):
+            return jsonify({"market_open": False, "reason": "Outside refresh window"}), 200
 
         return jsonify({"market_open": True}), 200
+
     except Exception as e:
         app.logger.error(f"Error in /market/is_open: {str(e)}", exc_info=True)
         return jsonify({"market_open": False, "error": str(e)}), 500

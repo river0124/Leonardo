@@ -7,6 +7,8 @@ from collections import namedtuple
 import requests
 from loguru import logger
 
+DEBUG = 0  # 0이면 로그와 print 비활성화, 1이면 활성화
+
 
 # 로그 경로를 현재 파일(__file__) 기준으로 안전하게 구성
 LOG_PATH = os.path.join(os.path.dirname(__file__), "logs", "trading_{time:YYYY-MM-DD}.log")
@@ -44,7 +46,7 @@ class KoreaInvestEnv:
             account_num = cfg.get("stock_account_number", "")
         websocket_approval_key = self.get_websocket_approval_key(using_url, api_key, api_secret_key)
         account_access_token = self.get_account_access_token(using_url, api_key, api_secret_key)
-        logger.debug(f"🎫 선택된 토큰: {'token_paper.json' if is_paper_trading else 'token_real.json'}")
+        if DEBUG: logger.debug(f"🎫 선택된 토큰: {'token_paper.json' if is_paper_trading else 'token_real.json'}")
         self.base_headers["authorization"] = self.get_access_token()
         # Debug: show which token file is selected
         # (already logged above)
@@ -64,7 +66,7 @@ class KoreaInvestEnv:
                     self.cfg.get("paper_api_key") if self.cfg.get("is_paper_trading", True) else self.cfg.get("api_key"),
                     self.cfg.get("paper_api_secret_key") if self.cfg.get("is_paper_trading", True) else self.cfg.get("api_secret_key")
                 )
-            logger.debug("🔑 발급된 access_token: %s", self.access_token)
+            if DEBUG: logger.debug("🔑 발급된 access_token: %s", self.access_token)
             headers["authorization"] = self.access_token
         return headers
 
@@ -75,7 +77,7 @@ class KoreaInvestEnv:
         cfg = self.cfg
         token_path = os.path.join("cache", "token_paper.json") if cfg.get("is_paper_trading", True) else os.path.join("cache", "token_real.json")
         # Debug: print selected token file path
-        logger.debug(f"🗂️ 토큰 저장 파일 경로: {token_path}")
+        if DEBUG: logger.debug(f"🗂️ 토큰 저장 파일 경로: {token_path}")
 
         # Respect is_paper_trading and set request_base_url accordingly if not provided
         if not request_base_url:
@@ -86,7 +88,7 @@ class KoreaInvestEnv:
             with open(token_path, "r") as f:
                 token_data = json.load(f)
                 if time.time() - token_data.get("timestamp", 0) < 23 * 3600:
-                    logger.debug(f"♻️ 재사용 access_token from {token_path}: {token_data['token']}")
+                    if DEBUG: logger.debug(f"♻️ 재사용 access_token from {token_path}: {token_data['token']}")
                     self.access_token = token_data["token"]
                     return token_data["token"]
 
@@ -101,7 +103,7 @@ class KoreaInvestEnv:
         res = requests.post(url, data=json.dumps(p), headers={"content-type": "application/json"})
         res.raise_for_status()
         my_token = res.json()["access_token"]
-        logger.debug(f"access_token: {my_token}")
+        if DEBUG: logger.debug(f"access_token: {my_token}")
         bearer_token = f"Bearer {my_token}"
 
         # 파일 저장
@@ -117,7 +119,7 @@ class KoreaInvestEnv:
         # Ensure base headers are updated with the correct token
         self.base_headers["authorization"] = bearer_token
         # Debug: print stored access_token
-        logger.debug(f"✅ 저장된 access_token: {bearer_token}")
+        if DEBUG: logger.debug(f"✅ 저장된 access_token: {bearer_token}")
         self.access_token = bearer_token
 
         return bearer_token
@@ -128,7 +130,7 @@ class KoreaInvestEnv:
             if not self.access_token_paper and os.path.exists(paper_token_path):
                 with open(paper_token_path, "r") as f:
                     self.access_token_paper = json.load(f)["token"]
-                    logger.debug(f"📥 불러온 access_token (paper): {self.access_token_paper}")
+                    if DEBUG: logger.debug(f"📥 불러온 access_token (paper): {self.access_token_paper}")
             self.access_token = self.access_token_paper
             return self.access_token_paper
         else:
@@ -136,11 +138,12 @@ class KoreaInvestEnv:
             if not self.access_token_real and os.path.exists(real_token_path):
                 with open(real_token_path, "r") as f:
                     self.access_token_real = json.load(f)["token"]
-                    logger.debug(f"📥 불러온 access_token (real): {self.access_token_real}")
+                    if DEBUG: logger.debug(f"📥 불러온 access_token (real): {self.access_token_real}")
             self.access_token = self.access_token_real
             return self.access_token_real
 
     def get_websocket_approval_key(self, request_base_url="", api_key="", api_secret_key=""):
+        if DEBUG: logger.debug(f"🧩 get_websocket_approval_key 호출됨 - request_base_url: {request_base_url}, api_key: {api_key}, api_secret_key: {api_secret_key}")
         headers = {"content-type": "application/json"}
         body = {
             "grant_type": "client_credentials",
@@ -148,6 +151,7 @@ class KoreaInvestEnv:
             "secretkey": api_secret_key
         }
         url = f'{request_base_url}/oauth2/Approval'
+        if DEBUG: logger.debug(f"🔗 최종 Approval URL: {url}")
         res = requests.post(url, headers=headers, data=json.dumps(body))
         approval_key = res.json()["approval_key"]
         return approval_key
@@ -175,7 +179,7 @@ class KoreaInvestAPI:
         if rescode == 200:
             h["hashkey"] = res.json()["HASH"]
         else:
-            logger.info(f"Error: {rescode}")
+            if DEBUG: logger.info(f"Error: {rescode}")
 
     def do_sell(self, stock_code, order_qty, order_price, order_type="00"):
         t1 = self.do_order(stock_code, order_qty, order_price, buy_flag=False, order_type=order_type)
@@ -284,18 +288,18 @@ class KoreaInvestAPI:
             return None
 
     def _url_fetch(self, api_url, tr_id, params, is_post_request=False, use_hash=True):
-        logger.debug(f"🔍 _url_fetch 진입: api_url={api_url}, tr_id={tr_id}, is_post={is_post_request}")
+        if DEBUG: logger.debug(f"🔍 _url_fetch 진입: api_url={api_url}, tr_id={tr_id}, is_post={is_post_request}")
         try:
             url = f"{self.using_url}{api_url}"
-            logger.debug(f"📡 요청 URL: {url}")
+            if DEBUG: logger.debug(f"📡 요청 URL: {url}")
             headers = self._base_headers.copy()
             if tr_id[0] in ("T", "J", "C"):
                 if self.is_paper_trading:
                     tr_id = "V" + tr_id[1:]
             headers["tr_id"] = tr_id
             headers["custtype"] = self.custtype
-            logger.debug(f"📡 요청 헤더: {headers}")
-            logger.debug(f"📡 요청 파라미터: {params}")
+            if DEBUG: logger.debug(f"📡 요청 헤더: {headers}")
+            if DEBUG: logger.debug(f"📡 요청 파라미터: {params}")
 
             if is_post_request:
                 if use_hash:
@@ -305,16 +309,16 @@ class KoreaInvestAPI:
                 res = requests.get(url, headers=headers, params=params)
 
             if res.status_code == 200:
-                logger.debug(f"✅ 응답 수신 완료: {res.status_code}")
+                if DEBUG: logger.debug(f"✅ 응답 수신 완료: {res.status_code}")
                 return APIResponse(res)
             else:
-                logger.info(f"Error Code : {res.status_code} | {res.text}")
+                if DEBUG: logger.info(f"Error Code : {res.status_code} | {res.text}")
                 logger.error(f"📡 API 응답 오류: {res.status_code}, {res.text}")
-                logger.debug(f"❌ 응답 실패 본문: {res.text}")
+                if DEBUG: logger.debug(f"❌ 응답 실패 본문: {res.text}")
                 return None
         except Exception as e:
             logger.exception(f"❌ requests 예외 발생: {e}")
-            logger.debug(f"❌ 예외 발생 중 URL: {api_url}")
+            if DEBUG: logger.debug(f"❌ 예외 발생 중 URL: {api_url}")
             return None
 
 
@@ -345,9 +349,9 @@ class KoreaInvestAPI:
                 ar = self.do_cancel(x, qty_list[cnt], price_list[cnt], branch_list[cnt])
                 cnt += 1
                 if ar:
-                    logger.info(f"get_error_code: {ar.get_error_code()}, get_error_message: {ar.get_error_message()} ")
+                    if DEBUG: logger.info(f"get_error_code: {ar.get_error_code()}, get_error_message: {ar.get_error_message()} ")
                 else:
-                    logger.warning("주문 취소 응답 없음")
+                    if DEBUG: logger.warning("주문 취소 응답 없음")
                 time.sleep(0.02)
 
     def get_current_price(self, stock_no):
@@ -420,9 +424,9 @@ class KoreaInvestAPI:
         }
 
         response = self._url_fetch(url, tr_id, params)
-        logger.debug(f"📦 holdings_detailed API 응답 전체: {response.get_response().text if response else '응답 없음'}")
+        if DEBUG: logger.debug(f"📦 holdings_detailed API 응답 전체: {response.get_response().text if response else '응답 없음'}")
         if response is None or not response.is_ok():
-            logger.warning("❌ API 호출 실패 또는 응답 오류")
+            if DEBUG: logger.warning("❌ API 호출 실패 또는 응답 오류")
             return None
 
         body = response.get_body()
@@ -433,7 +437,7 @@ class KoreaInvestAPI:
         if hasattr(body, "output2") and isinstance(body.output2, list) and body.output2:
             output2 = body.output2[0]
         else:
-            logger.warning("⚠️ output2 비어 있음 — 총자산 요약 불가")
+            if DEBUG: logger.warning("⚠️ output2 비어 있음 — 총자산 요약 불가")
 
         summary = {
             "예수금총금액": output2.get("dnca_tot_amt"),
@@ -446,12 +450,22 @@ class KoreaInvestAPI:
             "금일제비용금액": output2.get("thdt_tlex_amt")
         }
 
-        logger.debug(f"📊 output1 (보유 종목): {output1}")
-        logger.debug(f"📈 summary (총자산 요약): {summary}")
+        if DEBUG: logger.debug(f"📊 output1 (보유 종목): {output1}")
+        if DEBUG: logger.debug(f"📈 summary (총자산 요약): {summary}")
+
+        # Check for empty holdings (output1)
+        if output1.empty:
+            if DEBUG: logger.debug("📭 보유 종목 없음: output1이 비어 있음")
+            return {
+                "stocks": [],
+                "summary": summary,
+                "is_empty": True
+            }
 
         return {
-            "stocks": output1,
-            "summary": summary
+            "stocks": output1.to_dict(orient='records'),
+            "summary": summary,
+            "is_empty": False
         }
 
     def get_candle_data(self, stock_code):
@@ -486,11 +500,11 @@ class KoreaInvestAPI:
                 else:
                     return None
             except Exception as e:
-                logger.info(f"총자산 추출 오류: {e}")
+                if DEBUG: logger.info(f"총자산 추출 오류: {e}")
                 return None
 
     def refresh_access_token(self):
-        logger.info("🔁 토큰 갱신 시작")
+        if DEBUG: logger.info("🔁 토큰 갱신 시작")
         is_paper = self.cfg.get("is_paper_trading", True)
         api_key = self.cfg.get("paper_api_key" if is_paper else "api_key")
         api_secret_key = self.cfg.get("paper_api_secret_key" if is_paper else "api_secret_key")
@@ -498,7 +512,7 @@ class KoreaInvestAPI:
 
         new_token = self.get_account_access_token(using_url, api_key, api_secret_key)
         self.base_headers["authorization"] = new_token
-        logger.info("✅ 토큰 갱신 완료")
+        if DEBUG: logger.info("✅ 토큰 갱신 완료")
 
 class APIResponse:
     def __init__(self, resp):
@@ -541,19 +555,20 @@ class APIResponse:
         return self._err_message
 
     def print_all(self):
-        logger.info("<Header>")
+        if DEBUG: logger.info("<Header>")
         for x in self.get_header()._fields:
-            logger.info(f"\t-{x}: {getattr(self.get_header(), x)}")
-        logger.info("<Body>")
+            if DEBUG: logger.info(f"\t-{x}: {getattr(self.get_header(), x)}")
+        if DEBUG: logger.info("<Body>")
         for x in self.get_body()._fields:
-            logger.info(f"\t-{x}: {getattr(self.get_body(), x)}")
+            if DEBUG: logger.info(f"\t-{x}: {getattr(self.get_body(), x)}")
 
     def print_error(self):
-        logger.info(f"---------------------------------")
-        logger.info(f"Error in response: {self.get_result_code()}")
-        logger.info(f"{self.get_body().rt_cd}, {self.get_error_code()}, {self.get_error_message()}")
-        logger.info(f"---------------------------------")
+        if DEBUG: logger.info(f"---------------------------------")
+        if DEBUG: logger.info(f"Error in response: {self.get_result_code()}")
+        if DEBUG: logger.info(f"{self.get_body().rt_cd}, {self.get_error_code()}, {self.get_error_message()}")
+        if DEBUG: logger.info(f"---------------------------------")
     # (Method removed: get_order_detail)
+
 def create_env_api():
     with open("cache/settings.json") as f:
         cfg = json.load(f)

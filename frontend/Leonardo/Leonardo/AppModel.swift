@@ -56,7 +56,6 @@ class AppModel: ObservableObject {
                     let settings = try JSONDecoder().decode(Settings.self, from: data)
                     DispatchQueue.main.async {
                         self.isPaperTrading = settings.is_paper_trading
-                        print("📌 서버에서 받은 isPaperTrading:", self.isPaperTrading)
                         self.reloadAllData()
                     }
                 } catch {
@@ -84,7 +83,6 @@ class AppModel: ObservableObject {
                         self.objectWillChange.send()
                         self.isPaperTrading = settings.is_paper_trading
                         self.isSettingsLoaded = true
-                        print("✅ Settings loaded.")
                         completion?()
                     }
                 } catch {
@@ -113,7 +111,6 @@ class AppModel: ObservableObject {
                             for code in codes {
                                 self.fetchStockInfo(code: code)
                             }
-                            print("✅ Watchlist loaded.")
                         }
                     }
                 } catch {
@@ -174,7 +171,6 @@ class AppModel: ObservableObject {
                     let list = try JSONDecoder().decode([StockInfo].self, from: data)
                     DispatchQueue.main.async {
                         self.stockList = list
-                        print("✅ Stock list loaded.")
                     }
                 } catch {
                     print("❌ Failed to decode stock_list:", error)
@@ -186,19 +182,9 @@ class AppModel: ObservableObject {
     }
     
     func reloadAllData() {
-        print("🔄 Reloading all data...")
-        print("📌 현재 isPaperTrading 상태:", self.isPaperTrading)
-
-        print("📥 Loading settings...")
         loadSettings()
-
-        print("📥 Loading total asset summary...")
         loadTotalAssetFromSummary()
-
-        print("📥 Loading watchlist...")
         loadWatchlist()
-
-        print("📥 Loading stock list...")
         loadStockList()
     }
 
@@ -213,8 +199,6 @@ class AppModel: ObservableObject {
                        let amount = Int(amountString.replacingOccurrences(of: ",", with: "")) {
                         DispatchQueue.main.async {
                             self.totalAsset = amount
-                            print("✅ Total asset summary loaded.")
-                            print("📊 총자산 업데이트됨: \(self.totalAsset)원 (isPaperTrading: \(self.isPaperTrading))")
                         }
                     }
                 } catch {
