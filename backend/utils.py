@@ -5,12 +5,6 @@ import os
 from collections import namedtuple
 
 import requests
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import unpad
-from base64 import b64decode
-
-from bokeh.layouts import column
-from joblib.testing import param
 from loguru import logger
 
 
@@ -189,7 +183,7 @@ class KoreaInvestAPI:
 
         if t1 is not None and t1.is_ok() and t1.get_body().output:
             tdf = pd.DataFrame(t1.get_body().output)
-            tdf.self_index("odno", inplace=True)
+            tdf.set_index("odno", inplace=True)
             cf1 = ["pdno", "ord_qty", "ord_unpr", "ord_tmd", "ord_gno_brno", "orgn_odno", "psbl_qty"]
             cf2 = ["종목코드", "주문수량", "주문단가", "주문시간", "주문점", "원주문번호", "주문가능수량"]
             tdf = tdf[cf1]
@@ -251,16 +245,21 @@ class KoreaInvestAPI:
                 return APIResponse(res)
             else:
                 logger.info(f"Error Code : {res.status_code} | {res.text}")
+                # Added detailed error logging for failed responses
+                # 추가 상세 에러 로그
+                logger.error(f"📡 API 응답 오류: {res.status_code}, {res.text}")
                 # Detect token expiration (EGW00123) and retry with refreshed token
                 if "EGW00123" in res.text:
                     logger.info("🔁 만료된 토큰 감지됨 → 토큰 재발급 시도")
-                    from utils import KoreaInvestEnv
-                    env = KoreaInvestEnv(self.get_env_config())
-                    self._base_headers = env.get_base_headers()
-                    return self._url_fetch(api_url, tr_id, params, is_post_request, use_hash)
+                    # from utils import KoreaInvestEnv
+                    # env = KoreaInvestEnv(self.get_env_config())
+                    # self._base_headers = env.get_base_headers()
+                    # return self._url_fetch(api_url, tr_id, params, is_post_request, use_hash)
+                    # Commented out above to avoid circular import
                 return None
         except Exception as e:
-            logger.info(f"URL exception: {e}")
+            logger.exception(f"❌ requests 예외 발생: {e}")
+            return None
 
 
     def get_env_config(self):
@@ -289,7 +288,10 @@ class KoreaInvestAPI:
                     continue
                 ar = self.do_cancel(x, qty_list[cnt], price_list[cnt], branch_list[cnt])
                 cnt += 1
-                logger.info(f"get_error_code: {ar.get_error_code()}, get_error_message: {ar.get_error_message()} ")
+                if ar:
+                    logger.info(f"get_error_code: {ar.get_error_code()}, get_error_message: {ar.get_error_message()} ")
+                else:
+                    logger.warning("주문 취소 응답 없음")
                 time.sleep(0.02)
 
     def get_current_price(self, stock_no):
@@ -344,40 +346,6 @@ class KoreaInvestAPI:
         # if cmd in (5, 6, 7, 8):
         #     senddata = '{"header":{"approval_key":"' + self.q_approval_key + '","personalseckey":"' + self.q_personalsecKey + '","custtype":"' + self.custtype + '","tr_type":' + tr_type +
 
-    def get_holdings(self):
-        url = "/uapi/domestic-stock/v1/trading/inquire-balance"
-        tr_id = "VTTC8434R" if self.is_paper_trading else "TTTC8434R"
-        params = {
-            "CANO": self.account_num[:8],
-            "ACNT_PRDT_CD": self.account_num[8:],
-            "AFHR_FLPR_YN": "N",
-            "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N",
-            "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "01",
-            "OFL_YN": "N",
-            "INQR_DVSN": "01",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": ""
-        }
-
-        response = self._url_fetch(url, tr_id, params)
-        if response is None:
-            logger.warning("❌ API 호출 결과: response is None")
-        elif not response.is_ok():
-            logger.warning(f"❌ API 오류: {response.get_error_code()} - {response.get_error_message()}")
-
-        if response and response.is_ok():
-            body = response.get_body()
-            try:
-                if hasattr(body, "output1") and body.output1:
-                    return pd.DataFrame(body.output1)
-                else:
-                    return pd.DataFrame()
-            except Exception as e:
-                logger.info(f"보유 종목 조회 오류: {e}")
-                return pd.DataFrame()
-
     def get_holdings_detailed(self):
         url = "/uapi/domestic-stock/v1/trading/inquire-balance"
         tr_id = "VTTC8434R" if self.is_paper_trading else "TTTC8434R"
@@ -402,21 +370,33 @@ class KoreaInvestAPI:
 
         body = response.get_body()
         output1 = pd.DataFrame(body.output1) if hasattr(body, "output1") else pd.DataFrame()
-        output2 = body.output2[0] if hasattr(body, "output2") and body.output2 else {}
+
+        # Robust extraction of output2
+        output2 = {}
+        if hasattr(body, "output2") and isinstance(body.output2, list) and body.output2:
+            output2 = body.output2[0]
+        else:
+            logger.warning("⚠️ output2 비어 있음 — 총자산 요약 불가")
+
+        summary = {
+            "예수금총금액": output2.get("dnca_tot_amt"),
+            "익일정산금액": output2.get("nxdy_excc_amt"),
+            "가수도정산금액": output2.get("prvs_rcdl_excc_amt"),
+            "총평가금액": output2.get("tot_evlu_amt"),
+            "자산증감액": output2.get("asst_icdc_amt"),
+            "금일매수수량": output2.get("thdt_buyqty"),
+            "금일매도수량": output2.get("thdt_sll_qty"),
+            "금일제비용금액": output2.get("thdt_tlex_amt")
+        }
 
         return {
             "stocks": output1,
-            "summary": {
-                "예수금총금액": output2.get("dnca_tot_amt"),
-                "익일정산금액": output2.get("nxdy_excc_amt"),
-                "가수도정산금액": output2.get("prvs_rcdl_excc_amt"),
-                "총평가금액": output2.get("tot_evlu_amt"),
-                "자산증감액": output2.get("asst_icdc_amt"),
-                "금일매수수량": output2.get("thdt_buyqty"),
-                "금일매도수량": output2.get("thdt_sll_qty"),
-                "금일제비용금액": output2.get("thdt_tlex_amt")
-            }
+            "summary": summary
         }
+
+    def get_candle_data(self, stock_code):
+        from get_candle_data import get_candle_chart_data
+        return get_candle_chart_data(stock_code)
 
 
     def get_total_asset(self):
@@ -502,3 +482,4 @@ class APIResponse:
         logger.info(f"Error in response: {self.get_result_code()}")
         logger.info(f"{self.get_body().rt_cd}, {self.get_error_code()}, {self.get_error_message()}")
         logger.info(f"---------------------------------")
+    # (Method removed: get_order_detail)

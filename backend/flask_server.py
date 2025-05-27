@@ -4,6 +4,7 @@ import os
 import pandas as pd
 from flask import Flask, request, jsonify, Response
 from cryptography.fernet import Fernet
+from trade_manager import TradeManager
 # import logging # app.logger.setLevel을 사용하려면 필요
 
 from get_asset import get_total_asset
@@ -80,6 +81,7 @@ if DEBUG:
 
 env = KoreaInvestEnv(cfg)
 api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers())
+trade_manager = TradeManager(api, cfg)
 
 # 주식 목록 CSV 파일 로드
 try:
@@ -262,6 +264,7 @@ def settings():
             return jsonify({"error": "Failed to save settings"}), 500
 
 
+
 @app.route('/holdings/detail', methods=['GET'])
 def holdings_detail():
     try:
@@ -284,20 +287,39 @@ def holdings_detail():
             stocks_list = []  # 예상치 못한 타입일 경우 빈 리스트로 처리
 
         # summary에서 특정 키 제거 (원본 summary_data를 변경하지 않도록 복사 후 작업 권장)
-        # final_summary = {k: v for k, v in summary_data.items() if k not in ["자산증감액", "총평가금액"]}
-        # 또는, 필요한 키만 선택하는 방식도 좋습니다.
-        # 여기서는 원본 코드의 pop 방식을 유지하되, 키 존재 여부 확인
         if "자산증감액" in summary_data:
             summary_data.pop("자산증감액")
-        if "총평가금액" in summary_data:  # 이 키는 /total_asset/summary에서 사용되므로 여기서 제거하는 것이 맞는지 확인 필요
+        if "총평가금액" in summary_data:
             summary_data.pop("총평가금액")
 
         return jsonify({
             "stocks": stocks_list,
-            "summary": summary_data  # 수정된 summary
+            "summary": summary_data
         }), 200
     except Exception as e:
         app.logger.error(f"Error in /holdings/detail: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+# /holdings 엔드포인트 수정: api.get_holdings() → api.get_holdings_detailed()["stocks"]
+@app.route("/holdings")
+def get_holdings():
+    try:
+        result = api.get_holdings_detailed()
+        if result is None or "stocks" not in result:
+            return jsonify({"error": "보유 종목 정보를 가져올 수 없습니다."}), 404
+
+        stocks_data = result["stocks"]
+        if isinstance(stocks_data, pd.DataFrame):
+            stocks_list = stocks_data.to_dict(orient="records")
+        elif isinstance(stocks_data, list):
+            stocks_list = stocks_data
+        else:
+            stocks_list = []
+
+        return jsonify(stocks_list), 200
+    except Exception as e:
+        app.logger.error(f"Error in /holdings: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -345,7 +367,7 @@ def total_asset_summary():
         # 여기서는 summary에 해당 키가 있다는 가정하에 진행
 
         filtered_summary = {
-            k: str(summary.get(k)) if summary.get(k) is not None else "0"
+            k: str(summary.get(k)) if summary.get(k) is not None else "None"
             for k in keys_to_include
         }
         # 또는 summary.get(k, "0") 을 사용하여 None일 경우 "0"으로 대체
@@ -368,14 +390,14 @@ def buy_stock():
             return jsonify({"success": False, "message": "요청 본문이 비어있거나 JSON 형식이 아닙니다."}), 400
 
         stock_code = data.get("stock_code")
-        quantity_str = data.get("quantity")  # 수량은 정수형으로 변환 필요
-        price_str = data.get("price")  # 가격도 정수형 또는 문자열(지정가 아닌 경우)
-        order_type = data.get("order_type")  # 예: "00" (지정가), "01" (시장가)
+        quantity_str = data.get("quantity")
+        price_str = data.get("price")
+        order_type = data.get("order_type")
 
         missing_fields = []
         if not stock_code: missing_fields.append("stock_code")
-        if quantity_str is None: missing_fields.append("quantity")  # None 체크
-        if price_str is None: missing_fields.append("price")  # None 체크
+        if quantity_str is None: missing_fields.append("quantity")
+        if price_str is None: missing_fields.append("price")
         if not order_type: missing_fields.append("order_type")
 
         if missing_fields:
@@ -383,47 +405,89 @@ def buy_stock():
 
         try:
             quantity = int(quantity_str)
-            # 가격은 주문 유형에 따라 다를 수 있음. 시장가의 경우 0 또는 특정 문자열일 수 있음.
-            # 여기서는 문자열로 전달한다고 가정하고, API 내부에서 처리한다고 가정.
-            # 필요시 int(price_str) 또는 float(price_str) 변환.
-            price = str(price_str)  # API.do_buy가 문자열 가격을 처리한다고 가정
+            price = str(price_str)
             if quantity <= 0:
                 return jsonify({"success": False, "message": "수량은 0보다 커야 합니다."}), 400
         except ValueError:
             return jsonify({"success": False, "message": "수량 또는 가격 형식이 올바르지 않습니다."}), 400
 
-        response = api.do_buy(stock_code, quantity, price, order_type)
+        atr_str = data.get("atr")
+        if atr_str is None:
+            return jsonify({"success": False, "message": "ATR 값이 누락되었습니다."}), 400
 
-        if response is None:
-            app.logger.error("API call to do_buy returned None.")
-            return jsonify({"success": False, "message": "매수 API 호출 중 응답을 받지 못했습니다."}), 500  # Internal Server Error
+        try:
+            atr = float(atr_str)
+        except ValueError:
+            return jsonify({"success": False, "message": "ATR 값이 숫자가 아닙니다."}), 400
 
-        if not response.is_ok():
-            # KIS API가 반환한 오류 (예: 잔고 부족, 잘못된 종목 코드 등)
-            # 클라이언트 측에서 조치 가능한 오류일 수 있으므로 4xx 상태 코드 사용
-            status_code = 400  # 기본적으로 Bad Request, KIS 오류 코드에 따라 세분화 가능
-            # 예: response.get_error_code()에 따라 422 (Unprocessable Entity) 등
-            return jsonify({
-                "success": False,
-                "code": response.get_error_code(),
-                "message": response.get_error_message()
-            }), status_code
+        result = trade_manager.place_order_with_stoploss(stock_code, quantity, price, atr, order_type)
 
-        body = response.get_body()
-        # body가 객체이고 __dict__를 통해 dict 변환이 필요하면 사용, 아니면 그대로 사용
-        response_data = body.__dict__ if hasattr(body, '__dict__') and not isinstance(body, dict) else body
+        if "error" in result:
+            return jsonify({"success": False, "message": result["error"]}), 500
 
         return jsonify({
             "success": True,
-            "message": "매수 요청이 정상적으로 처리되었습니다.",  # 주문 제출 성공 의미
-            "data": response_data
-        }), 200  # 성공 시 200 OK 또는 201 Created (자원 생성된 경우)
-
+            "message": "매수 요청이 정상적으로 처리되었습니다.",
+            "data": result
+        }), 200
     except Exception as e:
         app.logger.error(f"Unhandled exception in /buy: {str(e)}", exc_info=True)
         return jsonify({"success": False, "message": f"서버 처리 중 예외 발생: {str(e)}"}), 500
 
+@app.route('/sell', methods=['POST'])
+def sell_stock():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "요청 본문이 비어있거나 JSON 형식이 아닙니다."}), 400
+
+        stock_code = data.get("stock_code")
+        quantity_str = data.get("quantity")
+        price_str = data.get("price")
+        order_type = data.get("order_type")
+
+        missing_fields = []
+        if not stock_code: missing_fields.append("stock_code")
+        if quantity_str is None: missing_fields.append("quantity")
+        if price_str is None: missing_fields.append("price")
+        if not order_type: missing_fields.append("order_type")
+
+        if missing_fields:
+            return jsonify({"success": False, "message": f"필수 필드 누락: {', '.join(missing_fields)}"}), 400
+
+        try:
+            quantity = int(quantity_str)
+            price = str(price_str)
+            if quantity <= 0:
+                return jsonify({"success": False, "message": "수량은 0보다 커야 합니다."}), 400
+        except ValueError:
+            return jsonify({"success": False, "message": "수량 또는 가격 형식이 올바르지 않습니다."}), 400
+
+        response = api.do_sell(stock_code, quantity, price, order_type)
+
+        if response and response.is_ok():
+            return jsonify({
+                "success": True,
+                "message": "매도 요청이 정상적으로 처리되었습니다.",
+                "data": response.get_body()
+            }), 200
+        else:
+            error_msg = response.get_error_message() if response else "API 응답 없음"
+            return jsonify({"success": False, "message": f"매도 요청 실패: {error_msg}"}), 500
+
+    except Exception as e:
+        app.logger.error(f"Unhandled exception in /sell: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": f"서버 처리 중 예외 발생: {str(e)}"}), 500
+
+
+# ---- RISK STATUS ROUTE ----
+@app.route('/risk_status', methods=['GET'])
+def risk_status():
+    return jsonify(trade_manager.export_risk_state())
+
 
 if __name__ == '__main__':
     # SSL 사용 시: app.run(host='0.0.0.0', port=5051, ssl_context=('path/to/cert.pem', 'path/to/key.pem'))
+    import threading
+    threading.Thread(target=trade_manager.monitor_order_fill, daemon=True).start()
     app.run(host='0.0.0.0', port=5051, debug=bool(DEBUG))  # Flask의 debug 모드를 DEBUG 변수와 연동

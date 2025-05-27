@@ -53,6 +53,7 @@ struct ChartsView: View {
     
     private func calculateBettingSize() {
         guard appModel.totalAsset > 0 else {
+            print("🔸 총자산이 아직 설정되지 않았습니다. 현재 값: \(appModel.totalAsset)")
             bettingTextResult = "총자산이 설정되지 않았습니다."
             return
         }
@@ -434,6 +435,16 @@ struct ChartsView: View {
         }
         .onAppear {
             appModel.isMarketOrder = false
+            fetchCandleData(for: stock.Code)
+            fetchPriceData(for: stock.Code)
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if appModel.totalAsset > 0 {
+                    calculateBettingSize()
+                } else {
+                    print("🔸 총자산 값이 아직 초기화되지 않았습니다. 현재 값: \(appModel.totalAsset)")
+                }
+            }
         }
         .alert("매수를 하시겠습니까?", isPresented: $showBuyConfirmation) {
             Button("확인") {
@@ -447,7 +458,8 @@ struct ChartsView: View {
                     "stock_code": stock.Code,
                     "price": info.entryPrice,
                     "quantity": info.quantity,
-                    "order_type": info.orderType
+                    "order_type": info.orderType,
+                    "atr": atrValue
                 ]
 
                 do {

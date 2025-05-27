@@ -35,6 +35,7 @@ struct HoldingItem: Identifiable, Codable {
 struct HoldingView: View {
     @State private var holdings: [HoldingItem] = []
     @State private var depositSummary: [String: String] = [:]
+    @State private var timer: Timer?
 
     func formatNumber(_ number: String?) -> String {
         guard let value = Double(number ?? "") else { return number ?? "-" }
@@ -97,7 +98,16 @@ struct HoldingView: View {
                 .padding(.vertical, 4)
             }
         }
-        .onAppear(perform: fetchHoldings)
+        .onAppear {
+            fetchHoldings()
+            timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+                fetchHoldings()
+            }
+        }
+        .onDisappear {
+            timer?.invalidate()
+            timer = nil
+        }
     }
 
     func fetchHoldings() {

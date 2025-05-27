@@ -30,6 +30,7 @@ class AppModel: ObservableObject {
         loadStockList()
         loadTotalAssetFromSummary()  // ✅ Load total asset on app start
         loadSettings()
+        loadWatchlist() // ✅ Load watchlist on app start
     }
 
     struct Settings: Codable {
@@ -64,9 +65,14 @@ class AppModel: ObservableObject {
         URLSession.shared.dataTask(with: url) { data, _, error in
             if let data = data {
                 do {
-                    let result = try JSONDecoder().decode([String: [String]].self, from: data)
-                    DispatchQueue.main.async {
-                        self.watchlistCodes = result["watchlist"] ?? []
+                    let decoded = try JSONDecoder().decode([String: [String]].self, from: data)
+                    if let codes = decoded["watchlist"] {
+                        DispatchQueue.main.async {
+                            self.watchlistCodes = codes
+                            for code in codes {
+                                self.fetchStockInfo(code: code)
+                            }
+                        }
                     }
                 } catch {
                     print("❌ 디코딩 실패:", error)
@@ -159,5 +165,25 @@ class AppModel: ObservableObject {
     }
     func loadWatchlist() {
         fetchWatchlist()
+    }
+    
+    func fetchStockInfo(code: String) {
+        guard let url = URL(string: "http://127.0.0.1:5051/stockname?code=\(code)") else { return }
+
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            if let data = data {
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let name = json["name"] as? String {
+                        let item = WatchStockItem(id: code, Code: code, Name: name)
+                        DispatchQueue.main.async {
+                            self.stockCache[code] = item
+                        }
+                    }
+                } catch {
+                    print("❌ 종목명 디코딩 실패:", error)
+                }
+            }
+        }.resume()
     }
 }
