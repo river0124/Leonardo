@@ -100,9 +100,26 @@ struct HoldingView: View {
         }
         .onAppear {
             fetchHoldings()
-            timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-                fetchHoldings()
-            }
+
+            guard let marketStatusURL = URL(string: "http://127.0.0.1:5051/market/is_open") else { return }
+
+            URLSession.shared.dataTask(with: marketStatusURL) { data, _, _ in
+                guard let data = data else { return }
+                do {
+                    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                    if let isMarketOpen = json?["is_market_open"] as? Bool, isMarketOpen {
+                        DispatchQueue.main.async {
+                            timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+                                fetchHoldings()
+                            }
+                        }
+                    } else {
+                        print("📌 시장이 열리지 않았습니다. 리프레시 비활성화")
+                    }
+                } catch {
+                    print("❌ 시장 개장 여부 확인 실패: \(error)")
+                }
+            }.resume()
         }
         .onDisappear {
             timer?.invalidate()

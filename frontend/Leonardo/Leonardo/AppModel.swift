@@ -12,6 +12,13 @@ struct StockInfo: Identifiable, Codable {
     let code: String
 }
 
+struct Settings: Codable {
+    let atr_period: Int
+    let max_loss_ratio: Double
+    let is_paper_trading: Bool
+}
+
+
 class AppModel: ObservableObject {
     static let shared = AppModel()
     @Published var stockList: [StockInfo] = []
@@ -23,24 +30,49 @@ class AppModel: ObservableObject {
     @Published var maxLossRatio: Double = -0.01
     @Published var totalAsset: Int = 0
     @Published var isMarketOrder: Bool = true
-    @Published var isPaperTrading: Bool = true
+    @Published var isPaperTrading: Bool = true {
+        didSet {
+            updateTradingModeOnServer()
+            loadTotalAssetFromSummary()
+        }
+    }
     @Published var isSettingsLoaded: Bool = false
 
     init() {
-        loadStockList()
-        loadTotalAssetFromSummary()  // ✅ Load total asset on app start
-        loadSettings()
-        loadWatchlist() // ✅ Load watchlist on app start
+        loadSettings {
+            self.loadTotalAssetFromSummary()
+            self.loadStockList()
+            self.loadWatchlist()
+        }
     }
 
-    struct Settings: Codable {
-        let atr_period: Int
-        let max_loss_ratio: Double
-        let is_paper_trading: Bool
-    }
 
-    func loadSettings() {
+    func applyTradingModeAndReload() {
         guard let url = URL(string: "http://127.0.0.1:5051/settings") else { return }
+
+        URLSession.shared.dataTask(with: url) { data, _, error in
+            if let data = data {
+                do {
+                    let settings = try JSONDecoder().decode(Settings.self, from: data)
+                    DispatchQueue.main.async {
+                        self.isPaperTrading = settings.is_paper_trading
+                        print("📌 서버에서 받은 isPaperTrading:", self.isPaperTrading)
+                        self.reloadAllData()
+                    }
+                } catch {
+                    print("❌ applyTradingModeAndReload 디코딩 실패:", error)
+                }
+            } else if let error = error {
+                print("❌ applyTradingModeAndReload 요청 실패:", error.localizedDescription)
+            }
+        }.resume()
+    }
+
+    func loadSettings(completion: (() -> Void)? = nil) {
+        guard let url = URL(string: "http://127.0.0.1:5051/settings") else {
+            completion?()
+            return
+        }
 
         URLSession.shared.dataTask(with: url) { data, _, error in
             if let data = data {
@@ -49,12 +81,21 @@ class AppModel: ObservableObject {
                     DispatchQueue.main.async {
                         self.atrPeriod = settings.atr_period
                         self.maxLossRatio = settings.max_loss_ratio
+                        self.objectWillChange.send()
                         self.isPaperTrading = settings.is_paper_trading
                         self.isSettingsLoaded = true
+                        print("✅ Settings loaded.")
+                        completion?()
                     }
                 } catch {
                     print("❌ 설정 디코딩 실패:", error)
+                    completion?()
                 }
+            } else {
+                if let error = error {
+                    print("❌ loadSettings 요청 실패:", error.localizedDescription)
+                }
+                completion?()
             }
         }.resume()
     }
@@ -72,6 +113,7 @@ class AppModel: ObservableObject {
                             for code in codes {
                                 self.fetchStockInfo(code: code)
                             }
+                            print("✅ Watchlist loaded.")
                         }
                     }
                 } catch {
@@ -132,6 +174,7 @@ class AppModel: ObservableObject {
                     let list = try JSONDecoder().decode([StockInfo].self, from: data)
                     DispatchQueue.main.async {
                         self.stockList = list
+                        print("✅ Stock list loaded.")
                     }
                 } catch {
                     print("❌ Failed to decode stock_list:", error)
@@ -142,6 +185,23 @@ class AppModel: ObservableObject {
         }.resume()
     }
     
+    func reloadAllData() {
+        print("🔄 Reloading all data...")
+        print("📌 현재 isPaperTrading 상태:", self.isPaperTrading)
+
+        print("📥 Loading settings...")
+        loadSettings()
+
+        print("📥 Loading total asset summary...")
+        loadTotalAssetFromSummary()
+
+        print("📥 Loading watchlist...")
+        loadWatchlist()
+
+        print("📥 Loading stock list...")
+        loadStockList()
+    }
+
     func loadTotalAssetFromSummary() {
         guard let url = URL(string: "http://127.0.0.1:5051/total_asset/summary") else { return }
 
@@ -153,6 +213,8 @@ class AppModel: ObservableObject {
                        let amount = Int(amountString.replacingOccurrences(of: ",", with: "")) {
                         DispatchQueue.main.async {
                             self.totalAsset = amount
+                            print("✅ Total asset summary loaded.")
+                            print("📊 총자산 업데이트됨: \(self.totalAsset)원 (isPaperTrading: \(self.isPaperTrading))")
                         }
                     }
                 } catch {
@@ -185,5 +247,17 @@ class AppModel: ObservableObject {
                 }
             }
         }.resume()
+    }
+    func updateTradingModeOnServer() {
+        guard let url = URL(string: "http://127.0.0.1:5051/settings") else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body = ["is_paper_trading": isPaperTrading]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        URLSession.shared.dataTask(with: request).resume()
     }
 }

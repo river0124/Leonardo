@@ -1,19 +1,18 @@
-import yaml
-CONFIG_PATH = "/Users/hyungseoklee/Documents/Leonardo/backend/config.yaml"
-
+import json
+SETTINGS_PATH = "/Users/hyungseoklee/Documents/Leonardo/backend/cache/settings.json"
 
 # 설정 파일에서 Webhook URL 로드
-def load_slack_webhook_url(config_path=CONFIG_PATH):
+def load_slack_webhook_url(settings_path=SETTINGS_PATH):
     try:
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-            return config["slack"]["webhook_url"]
+        with open(settings_path, "r") as f:
+            config = json.load(f)
+            return config["slack_webhook_url"]
     except Exception as e:
-        print(f"⚠️ config.yaml 로드 실패: {e}")
+        print(f"⚠️ settings.json 로드 실패: {e}")
         return None
 
-def post_to_slack(text: str, config_path=CONFIG_PATH):
-    webhook_url = load_slack_webhook_url(config_path)
+def post_to_slack(text: str, settings_path=SETTINGS_PATH):
+    webhook_url = load_slack_webhook_url(settings_path)
     if not webhook_url:
         print("❌ Webhook URL이 설정되지 않았습니다.")
         return

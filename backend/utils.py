@@ -26,6 +26,11 @@ class KoreaInvestEnv:
             "charset": "UTF-8",
             "User_Agent": cfg.get("my_agent", "")
         }
+        # Maintain both real and paper access tokens
+        self.access_token_real = None
+        self.access_token_paper = None
+        # Initialize self.access_token for base_headers logic
+        self.access_token = None
         is_paper_trading = cfg.get("is_paper_trading", True)
         if is_paper_trading:
             using_url = cfg.get("paper_url", "")
@@ -39,7 +44,10 @@ class KoreaInvestEnv:
             account_num = cfg.get("stock_account_number", "")
         websocket_approval_key = self.get_websocket_approval_key(using_url, api_key, api_secret_key)
         account_access_token = self.get_account_access_token(using_url, api_key, api_secret_key)
-        self.base_headers["authorization"] = account_access_token
+        logger.debug(f"🎫 선택된 토큰: {'token_paper.json' if is_paper_trading else 'token_real.json'}")
+        self.base_headers["authorization"] = self.get_access_token()
+        # Debug: show which token file is selected
+        # (already logged above)
         self.base_headers["appkey"] = api_key
         self.base_headers["appsecret"] = api_secret_key
         self.cfg["websocket_approval_key"] = websocket_approval_key
@@ -47,19 +55,39 @@ class KoreaInvestEnv:
         self.cfg["using_url"] = using_url
 
     def get_base_headers(self):
-        return copy.deepcopy(self.base_headers)
+        headers = self.base_headers.copy()
+        if "authorization" not in headers or headers["authorization"] is None:
+            self.access_token = self.get_access_token()
+            if self.access_token is None:
+                self.access_token = self.get_account_access_token(
+                    self.cfg.get("paper_url") if self.cfg.get("is_paper_trading", True) else self.cfg.get("url"),
+                    self.cfg.get("paper_api_key") if self.cfg.get("is_paper_trading", True) else self.cfg.get("api_key"),
+                    self.cfg.get("paper_api_secret_key") if self.cfg.get("is_paper_trading", True) else self.cfg.get("api_secret_key")
+                )
+            logger.debug("🔑 발급된 access_token: %s", self.access_token)
+            headers["authorization"] = self.access_token
+        return headers
 
     def get_full_config(self):
         return copy.deepcopy(self.cfg)
 
     def get_account_access_token(self, request_base_url="", api_key="", api_secret_key=""):
-        token_path = "./token.json"
+        cfg = self.cfg
+        token_path = os.path.join("cache", "token_paper.json") if cfg.get("is_paper_trading", True) else os.path.join("cache", "token_real.json")
+        # Debug: print selected token file path
+        logger.debug(f"🗂️ 토큰 저장 파일 경로: {token_path}")
+
+        # Respect is_paper_trading and set request_base_url accordingly if not provided
+        if not request_base_url:
+            request_base_url = cfg.get("paper_url", "") if cfg.get("is_paper_trading", True) else cfg.get("url", "")
 
         # 기존 토큰이 존재하고 23시간 내면 재사용
         if os.path.exists(token_path):
             with open(token_path, "r") as f:
                 token_data = json.load(f)
                 if time.time() - token_data.get("timestamp", 0) < 23 * 3600:
+                    logger.debug(f"♻️ 재사용 access_token from {token_path}: {token_data['token']}")
+                    self.access_token = token_data["token"]
                     return token_data["token"]
 
         # 새로 발급
@@ -73,13 +101,44 @@ class KoreaInvestEnv:
         res = requests.post(url, data=json.dumps(p), headers={"content-type": "application/json"})
         res.raise_for_status()
         my_token = res.json()["access_token"]
+        logger.debug(f"access_token: {my_token}")
         bearer_token = f"Bearer {my_token}"
 
         # 파일 저장
         with open(token_path, "w") as f:
             json.dump({"token": bearer_token, "timestamp": time.time()}, f)
 
+        # Store in appropriate attribute
+        if request_base_url == self.cfg.get("paper_url", ""):
+            self.access_token_paper = bearer_token
+        else:
+            self.access_token_real = bearer_token
+
+        # Ensure base headers are updated with the correct token
+        self.base_headers["authorization"] = bearer_token
+        # Debug: print stored access_token
+        logger.debug(f"✅ 저장된 access_token: {bearer_token}")
+        self.access_token = bearer_token
+
         return bearer_token
+
+    def get_access_token(self):
+        if self.cfg.get("is_paper_trading", True):
+            paper_token_path = os.path.join("cache", "token_paper.json")
+            if not self.access_token_paper and os.path.exists(paper_token_path):
+                with open(paper_token_path, "r") as f:
+                    self.access_token_paper = json.load(f)["token"]
+                    logger.debug(f"📥 불러온 access_token (paper): {self.access_token_paper}")
+            self.access_token = self.access_token_paper
+            return self.access_token_paper
+        else:
+            real_token_path = os.path.join("cache", "token_real.json")
+            if not self.access_token_real and os.path.exists(real_token_path):
+                with open(real_token_path, "r") as f:
+                    self.access_token_real = json.load(f)["token"]
+                    logger.debug(f"📥 불러온 access_token (real): {self.access_token_real}")
+            self.access_token = self.access_token_real
+            return self.access_token_real
 
     def get_websocket_approval_key(self, request_base_url="", api_key="", api_secret_key=""):
         headers = {"content-type": "application/json"}
@@ -225,14 +284,18 @@ class KoreaInvestAPI:
             return None
 
     def _url_fetch(self, api_url, tr_id, params, is_post_request=False, use_hash=True):
+        logger.debug(f"🔍 _url_fetch 진입: api_url={api_url}, tr_id={tr_id}, is_post={is_post_request}")
         try:
             url = f"{self.using_url}{api_url}"
+            logger.debug(f"📡 요청 URL: {url}")
             headers = self._base_headers.copy()
             if tr_id[0] in ("T", "J", "C"):
                 if self.is_paper_trading:
                     tr_id = "V" + tr_id[1:]
             headers["tr_id"] = tr_id
             headers["custtype"] = self.custtype
+            logger.debug(f"📡 요청 헤더: {headers}")
+            logger.debug(f"📡 요청 파라미터: {params}")
 
             if is_post_request:
                 if use_hash:
@@ -242,23 +305,16 @@ class KoreaInvestAPI:
                 res = requests.get(url, headers=headers, params=params)
 
             if res.status_code == 200:
+                logger.debug(f"✅ 응답 수신 완료: {res.status_code}")
                 return APIResponse(res)
             else:
                 logger.info(f"Error Code : {res.status_code} | {res.text}")
-                # Added detailed error logging for failed responses
-                # 추가 상세 에러 로그
                 logger.error(f"📡 API 응답 오류: {res.status_code}, {res.text}")
-                # Detect token expiration (EGW00123) and retry with refreshed token
-                if "EGW00123" in res.text:
-                    logger.info("🔁 만료된 토큰 감지됨 → 토큰 재발급 시도")
-                    # from utils import KoreaInvestEnv
-                    # env = KoreaInvestEnv(self.get_env_config())
-                    # self._base_headers = env.get_base_headers()
-                    # return self._url_fetch(api_url, tr_id, params, is_post_request, use_hash)
-                    # Commented out above to avoid circular import
+                logger.debug(f"❌ 응답 실패 본문: {res.text}")
                 return None
         except Exception as e:
             logger.exception(f"❌ requests 예외 발생: {e}")
+            logger.debug(f"❌ 예외 발생 중 URL: {api_url}")
             return None
 
 
@@ -364,6 +420,7 @@ class KoreaInvestAPI:
         }
 
         response = self._url_fetch(url, tr_id, params)
+        logger.debug(f"📦 holdings_detailed API 응답 전체: {response.get_response().text if response else '응답 없음'}")
         if response is None or not response.is_ok():
             logger.warning("❌ API 호출 실패 또는 응답 오류")
             return None
@@ -388,6 +445,9 @@ class KoreaInvestAPI:
             "금일매도수량": output2.get("thdt_sll_qty"),
             "금일제비용금액": output2.get("thdt_tlex_amt")
         }
+
+        logger.debug(f"📊 output1 (보유 종목): {output1}")
+        logger.debug(f"📈 summary (총자산 요약): {summary}")
 
         return {
             "stocks": output1,
@@ -428,6 +488,17 @@ class KoreaInvestAPI:
             except Exception as e:
                 logger.info(f"총자산 추출 오류: {e}")
                 return None
+
+    def refresh_access_token(self):
+        logger.info("🔁 토큰 갱신 시작")
+        is_paper = self.cfg.get("is_paper_trading", True)
+        api_key = self.cfg.get("paper_api_key" if is_paper else "api_key")
+        api_secret_key = self.cfg.get("paper_api_secret_key" if is_paper else "api_secret_key")
+        using_url = self.cfg.get("paper_url" if is_paper else "url")
+
+        new_token = self.get_account_access_token(using_url, api_key, api_secret_key)
+        self.base_headers["authorization"] = new_token
+        logger.info("✅ 토큰 갱신 완료")
 
 class APIResponse:
     def __init__(self, resp):
@@ -483,3 +554,9 @@ class APIResponse:
         logger.info(f"{self.get_body().rt_cd}, {self.get_error_code()}, {self.get_error_message()}")
         logger.info(f"---------------------------------")
     # (Method removed: get_order_detail)
+def create_env_api():
+    with open("cache/settings.json") as f:
+        cfg = json.load(f)
+    env = KoreaInvestEnv(cfg)
+    api = KoreaInvestAPI(cfg, env.get_base_headers())
+    return env, api

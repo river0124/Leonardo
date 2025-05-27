@@ -61,13 +61,16 @@ def load_settings():
             return {}
     return {}
 
-# 설정 저장
-def save_settings(settings_dict: dict):
+
+# Helper function for saving settings (wraps original logic)
+def save_settings_to_file(settings_dict: dict):
     current_settings = load_settings()
     # Encrypt sensitive fields
     for key in ["api_key", "access_token"]:
         if key in settings_dict and isinstance(settings_dict[key], str):
             settings_dict[key] = fernet.encrypt(settings_dict[key].encode()).decode()
+    if "is_paper_trading" in settings_dict:
+        current_settings["is_paper_trading"] = settings_dict["is_paper_trading"]
     current_settings.update(settings_dict)
     os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -235,33 +238,38 @@ def stockname():
         return jsonify({"error": f"Stock name not found for code {code}"}), 404
 
 
-@app.route('/settings', methods=['GET', 'POST'])
-def settings():
-    if request.method == 'GET':
-        try:
-            return jsonify(load_settings()), 200
-        except Exception as e:  # load_settings 내부에서 예외 처리하므로, 여기서는 일반적인 오류로 처리
-            app.logger.error(f"Error in GET /settings: {str(e)}", exc_info=True)
-            return jsonify({"error": "Failed to load settings"}), 500
-    elif request.method == 'POST':
-        try:
-            data = request.get_json()
-            if not data:
-                return jsonify({"error": "Request body is missing or not JSON"}), 400
-            if DEBUG:
-                print("📩 POST /settings 요청 수신:", data)
 
-            save_settings(data)
-            # 설정 변경 후 API 객체 재초기화
-            global cfg, env, api
+
+# Combined GET and POST /settings route to support retrieving and saving settings
+@app.route("/settings", methods=["GET", "POST"])
+def settings():
+    if request.method == "POST":
+        try:
+            settings = request.get_json()
+            if not settings:
+                return jsonify({"error": "Invalid settings data"}), 400
+
+            save_settings_to_file(settings)
+
+            global env, api, trade_manager
             cfg = load_settings()
             env = KoreaInvestEnv(cfg)
             api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers())
-            app.logger.info("Settings updated and API re-initialized.")
+            trade_manager = TradeManager(api, cfg)
+
+            app.logger.debug(f"⚙️ Settings updated. Mode: {'모의투자' if cfg.get('is_paper_trading') else '실전투자'}")
             return jsonify({"message": "Settings saved successfully"}), 200
         except Exception as e:
-            app.logger.error(f"Error in POST /settings: {str(e)}", exc_info=True)
+            app.logger.error(f"Error saving settings: {e}", exc_info=True)
             return jsonify({"error": "Failed to save settings"}), 500
+
+    elif request.method == "GET":
+        try:
+            cfg = load_settings()
+            return jsonify(cfg), 200
+        except Exception as e:
+            app.logger.error(f"Error loading settings: {e}", exc_info=True)
+            return jsonify({"error": "Failed to load settings"}), 500
 
 
 
@@ -301,10 +309,11 @@ def holdings_detail():
         return jsonify({"error": str(e)}), 500
 
 
-# /holdings 엔드포인트 수정: api.get_holdings() → api.get_holdings_detailed()["stocks"]
 @app.route("/holdings")
 def get_holdings():
     try:
+        from utils import create_env_api  # ensure this import exists at the top if not already
+        env, api = create_env_api()  # Re-initialize per request
         result = api.get_holdings_detailed()
         if result is None or "stocks" not in result:
             return jsonify({"error": "보유 종목 정보를 가져올 수 없습니다."}), 404
@@ -479,6 +488,32 @@ def sell_stock():
         app.logger.error(f"Unhandled exception in /sell: {str(e)}", exc_info=True)
         return jsonify({"success": False, "message": f"서버 처리 중 예외 발생: {str(e)}"}), 500
 
+
+# ---- MARKET OPEN STATUS ROUTE ----
+@app.route("/market/is_open", methods=["GET"])
+def is_market_open():
+    try:
+        import datetime
+        today = datetime.date.today()
+        weekday = today.weekday()  # 0: Monday ~ 6: Sunday
+        if weekday >= 5:
+            return jsonify({"market_open": False, "reason": "Weekend"}), 200
+
+        holidays_path = os.path.join(CACHE_DIR, "holidays.csv")
+        if not os.path.exists(holidays_path):
+            app.logger.warning("holidays.csv not found.")
+            return jsonify({"market_open": True, "warning": "holidays.csv not found"}), 200
+
+        holidays_df = pd.read_csv(holidays_path, dtype=str)
+        holiday_dates = set(holidays_df["date"].tolist())
+        today_str = today.strftime("%Y-%m-%d")
+        if today_str in holiday_dates:
+            return jsonify({"market_open": False, "reason": "Holiday"}), 200
+
+        return jsonify({"market_open": True}), 200
+    except Exception as e:
+        app.logger.error(f"Error in /market/is_open: {str(e)}", exc_info=True)
+        return jsonify({"market_open": False, "error": str(e)}), 500
 
 # ---- RISK STATUS ROUTE ----
 @app.route('/risk_status', methods=['GET'])

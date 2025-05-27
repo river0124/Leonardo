@@ -21,7 +21,7 @@ struct CandleResponse: Codable {
 
 struct ChartsView: View {
     @EnvironmentObject var appModel: AppModel
-
+    
     let stock: StockItem
     @State private var candles: [Candle] = []
     @State private var show52Weeks = false
@@ -37,11 +37,12 @@ struct ChartsView: View {
     @State private var stopLoss: Double = 0.0
     @State private var totalInvestment: Double = 0.0
     @State private var investmentRatio: Double = 0.01
+    @State private var summary: [String: String] = [:]
     
     private var isStarred: Bool {
         appModel.watchlistCodes.contains(stock.Code)
     }
-
+    
     private var yRange: ClosedRange<Double>? {
         guard let minLow = candles.map({ $0.low }).min(),
               let maxHigh = candles.map({ $0.high }).max() else {
@@ -57,7 +58,7 @@ struct ChartsView: View {
             bettingTextResult = "총자산이 설정되지 않았습니다."
             return
         }
-
+        
         self.riskRatio = abs(appModel.maxLossRatio)
         let atrPeriod = appModel.atrPeriod
         let atrs: [Double] = {
@@ -87,7 +88,7 @@ struct ChartsView: View {
         let investmentRatio = Double(appModel.totalAsset) > 0 ? totalInvestment / Double(appModel.totalAsset) : 0
         self.investmentRatio = investmentRatio
     }
-
+    
     var body: some View {
         
         HStack(alignment: .top) {
@@ -174,323 +175,337 @@ struct ChartsView: View {
             }
         }
         .font(.caption)
-    
+        
         ZStack {
-        VStack(alignment: .leading) {
-
-            if candles.isEmpty {
-                Text("로딩 중...")
-                    .onAppear {
-                        fetchCandleData(for: stock.Code)
-                        fetchPriceData(for: stock.Code)
-                        calculateBettingSize()
-                    }
-            } else {
-                // onChange for show52Weeks: fetch data when toggled
-                EmptyView()
-                    .onChange(of: show52Weeks) { _, _ in
-                        fetchCandleData(for: stock.Code)
-                    }
-
-                ZStack(alignment: .topLeading) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-
-                        Chart {
-                            // MA5 (5-day moving average) line
-                            let ma5 = candles.enumerated().map { index, _ in
-                                let start = max(0, index - 4)
-                                let subset = candles[start...index]
-                                let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
-                                return (candles[index].date, avg)
-                            }
-                            ForEach(ma5, id: \.0) { (date, avg) in
-                                LineMark(
-                                    x: .value("날짜", date),
-                                    y: .value("MA5", avg),
-                                    series: .value("Series", "MA5")
-                                )
-                                .foregroundStyle(.green)
-                                .lineStyle(StrokeStyle(lineWidth: 1.5))
-                                .opacity(0.6)
-                            }
-
-                            // MA20 (20-day moving average) line
-                            let ma20 = candles.enumerated().map { index, _ in
-                                let start = max(0, index - 19)
-                                let subset = candles[start...index]
-                                let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
-                                return (candles[index].date, avg)
-                            }
-                            ForEach(ma20, id: \.0) { (date, avg) in
-                                LineMark(
-                                    x: .value("날짜", date),
-                                    y: .value("MA20", avg),
-                                    series: .value("Series", "MA20")
-                                )
-                                .foregroundStyle(.red)
-                                .lineStyle(StrokeStyle(lineWidth: 1.5))
-                                .opacity(0.6)
-                            }
-
-                            let ma60 = candles.enumerated().map { index, _ in
-                                let start = max(0, index - 59)
-                                let subset = candles[start...index]
-                                let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
-                                return (candles[index].date, avg)
-                            }
-                            ForEach(ma60, id: \.0) { (date, avg) in
-                                LineMark(
-                                    x: .value("날짜", date),
-                                    y: .value("MA60", avg),
-                                    series: .value("Series", "MA60")
-                                )
-                                .foregroundStyle(.orange)
-                                .lineStyle(StrokeStyle(lineWidth: 1.5))
-                                .opacity(0.6)
-                            }
-
-                            let ma120 = candles.enumerated().map { index, _ in
-                                let start = max(0, index - 119)
-                                let subset = candles[start...index]
-                                let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
-                                return (candles[index].date, avg)
-                            }
-                            ForEach(ma120, id: \.0) { (date, avg) in
-                                LineMark(
-                                    x: .value("날짜", date),
-                                    y: .value("MA120", avg),
-                                    series: .value("Series", "MA120")
-                                )
-                                .foregroundStyle(.purple)
-                                .lineStyle(StrokeStyle(lineWidth: 1.5))
-                                .opacity(0.6)
-                            }
-
-                            ForEach(candles) { candle in
-                                RuleMark(
-                                    x: .value("날짜", candle.date),
-                                    yStart: .value("저가", candle.low),
-                                    yEnd: .value("고가", candle.high)
-                                )
-                                .lineStyle(StrokeStyle(lineWidth: 1))
-                                .foregroundStyle(.gray)
-
-                                RectangleMark(
-                                    x: .value("날짜", candle.date),
-                                    yStart: .value("시가", candle.open),
-                                    yEnd: .value("종가", candle.close)
-                                )
-                                .foregroundStyle(candle.close >= candle.open ? .red : .blue)
-                                .cornerRadius(1)
-                                
-                                let priceRange = (yRange?.upperBound ?? 1) - (yRange?.lowerBound ?? 0)
-                                let volumeHeight = priceRange * 0.15
-                                let maxVolume = candles.map(\.volume).max() ?? 1
-
-                                BarMark(
-                                    x: .value("날짜", candle.date),
-                                    yStart: .value("거래량 시작", (yRange?.lowerBound ?? 0)),
-                                    yEnd: .value("거래량", (candle.volume / maxVolume) * volumeHeight + (yRange?.lowerBound ?? 0))
-                                )
-                                .foregroundStyle(.purple.opacity(0.3))
-                            }
-
-                            if let highest = candles.max(by: { $0.high < $1.high }) {
-                                PointMark(
-                                    x: .value("날짜", highest.date),
-                                    y: .value("고가", highest.high)
-                                )
-                                .symbol {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 8))
-                                        .foregroundColor(.gray)
-                                }
-                                .symbolSize(10)
-                                .foregroundStyle(.red)
-                                .annotation(position: .top) {
-                                    VStack(spacing: 2) {
-                                        Text("최고 \(formattedNumber("\(Int(highest.high))"))")
-                                        Text("\(highest.date)")
-                                            .font(.system(size: 9))
-                                    }
-                                    .font(.caption)
-                                    .foregroundColor(.red)
-                                    .multilineTextAlignment(.center)
-                                    .frame(maxWidth: .infinity)
-                                    .zIndex(1)
-                                }
-                            }
-
-                            if let lowest = candles.min(by: { $0.low < $1.low }) {
-                                PointMark(
-                                    x: .value("날짜", lowest.date),
-                                    y: .value("저가", lowest.low)
-                                )
-                                .symbol {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 8))
-                                        .foregroundColor(.gray)
-                                }
-                                .symbolSize(10)
-                                .foregroundStyle(.blue)
-                                .annotation(position: .bottomTrailing) {
-                                    VStack(spacing: 2) {
-                                        Text("최저 \(formattedNumber("\(Int(lowest.low))"))")
-                                        Text("\(lowest.date)")
-                                            .font(.system(size: 9))
-                                    }
-                                    .font(.caption)
-                                    .foregroundColor(.blue)
-                                    .multilineTextAlignment(.center)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .padding(.leading, -35)
-                                }
-                            }
+            VStack(alignment: .leading) {
+                
+                if candles.isEmpty {
+                    Text("로딩 중...")
+                        .onAppear {
+                            fetchCandleData(for: stock.Code)
+                            fetchPriceData(for: stock.Code)
+                            calculateBettingSize()
                         }
-                        .background(
+                } else {
+                    // onChange for show52Weeks: fetch data when toggled
+                    EmptyView()
+                        .onChange(of: show52Weeks) { _, _ in
+                            fetchCandleData(for: stock.Code)
+                        }
+                    
+                    ZStack(alignment: .topLeading) {
+                        ZStack {
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.white.opacity(0.05), lineWidth: 1)
-                        )
-                        .chartXAxis {
-                            AxisMarks { value in
-                                AxisTick()
-                                // AxisValueLabel 제거로 텍스트 숨김
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                            
+                            Chart {
+                                // MA5 (5-day moving average) line
+                                let ma5 = candles.enumerated().map { index, _ in
+                                    let start = max(0, index - 4)
+                                    let subset = candles[start...index]
+                                    let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
+                                    return (candles[index].date, avg)
+                                }
+                                ForEach(ma5, id: \.0) { (date, avg) in
+                                    LineMark(
+                                        x: .value("날짜", date),
+                                        y: .value("MA5", avg),
+                                        series: .value("Series", "MA5")
+                                    )
+                                    .foregroundStyle(.green)
+                                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                                    .opacity(0.6)
+                                }
+                                
+                                // MA20 (20-day moving average) line
+                                let ma20 = candles.enumerated().map { index, _ in
+                                    let start = max(0, index - 19)
+                                    let subset = candles[start...index]
+                                    let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
+                                    return (candles[index].date, avg)
+                                }
+                                ForEach(ma20, id: \.0) { (date, avg) in
+                                    LineMark(
+                                        x: .value("날짜", date),
+                                        y: .value("MA20", avg),
+                                        series: .value("Series", "MA20")
+                                    )
+                                    .foregroundStyle(.red)
+                                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                                    .opacity(0.6)
+                                }
+                                
+                                let ma60 = candles.enumerated().map { index, _ in
+                                    let start = max(0, index - 59)
+                                    let subset = candles[start...index]
+                                    let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
+                                    return (candles[index].date, avg)
+                                }
+                                ForEach(ma60, id: \.0) { (date, avg) in
+                                    LineMark(
+                                        x: .value("날짜", date),
+                                        y: .value("MA60", avg),
+                                        series: .value("Series", "MA60")
+                                    )
+                                    .foregroundStyle(.orange)
+                                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                                    .opacity(0.6)
+                                }
+                                
+                                let ma120 = candles.enumerated().map { index, _ in
+                                    let start = max(0, index - 119)
+                                    let subset = candles[start...index]
+                                    let avg = subset.map(\.close).reduce(0, +) / Double(subset.count)
+                                    return (candles[index].date, avg)
+                                }
+                                ForEach(ma120, id: \.0) { (date, avg) in
+                                    LineMark(
+                                        x: .value("날짜", date),
+                                        y: .value("MA120", avg),
+                                        series: .value("Series", "MA120")
+                                    )
+                                    .foregroundStyle(.purple)
+                                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                                    .opacity(0.6)
+                                }
+                                
+                                ForEach(candles) { candle in
+                                    RuleMark(
+                                        x: .value("날짜", candle.date),
+                                        yStart: .value("저가", candle.low),
+                                        yEnd: .value("고가", candle.high)
+                                    )
+                                    .lineStyle(StrokeStyle(lineWidth: 1))
+                                    .foregroundStyle(.gray)
+                                    
+                                    RectangleMark(
+                                        x: .value("날짜", candle.date),
+                                        yStart: .value("시가", candle.open),
+                                        yEnd: .value("종가", candle.close)
+                                    )
+                                    .foregroundStyle(candle.close >= candle.open ? .red : .blue)
+                                    .cornerRadius(1)
+                                    
+                                    let priceRange = (yRange?.upperBound ?? 1) - (yRange?.lowerBound ?? 0)
+                                    let volumeHeight = priceRange * 0.15
+                                    let maxVolume = candles.map(\.volume).max() ?? 1
+                                    
+                                    BarMark(
+                                        x: .value("날짜", candle.date),
+                                        yStart: .value("거래량 시작", (yRange?.lowerBound ?? 0)),
+                                        yEnd: .value("거래량", (candle.volume / maxVolume) * volumeHeight + (yRange?.lowerBound ?? 0))
+                                    )
+                                    .foregroundStyle(.purple.opacity(0.3))
+                                }
+                                
+                                if let highest = candles.max(by: { $0.high < $1.high }) {
+                                    PointMark(
+                                        x: .value("날짜", highest.date),
+                                        y: .value("고가", highest.high)
+                                    )
+                                    .symbol {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 8))
+                                            .foregroundColor(.gray)
+                                    }
+                                    .symbolSize(10)
+                                    .foregroundStyle(.red)
+                                    .annotation(position: .top) {
+                                        VStack(spacing: 2) {
+                                            Text("최고 \(formattedNumber("\(Int(highest.high))"))")
+                                            Text("\(highest.date)")
+                                                .font(.system(size: 9))
+                                        }
+                                        .font(.caption)
+                                        .foregroundColor(.red)
+                                        .multilineTextAlignment(.center)
+                                        .frame(maxWidth: .infinity)
+                                        .zIndex(1)
+                                    }
+                                }
+                                
+                                if let lowest = candles.min(by: { $0.low < $1.low }) {
+                                    PointMark(
+                                        x: .value("날짜", lowest.date),
+                                        y: .value("저가", lowest.low)
+                                    )
+                                    .symbol {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 8))
+                                            .foregroundColor(.gray)
+                                    }
+                                    .symbolSize(10)
+                                    .foregroundStyle(.blue)
+                                    .annotation(position: .bottomTrailing) {
+                                        VStack(spacing: 2) {
+                                            Text("최저 \(formattedNumber("\(Int(lowest.low))"))")
+                                            Text("\(lowest.date)")
+                                                .font(.system(size: 9))
+                                        }
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                        .multilineTextAlignment(.center)
+                                        .frame(maxWidth: .infinity, alignment: .center)
+                                        .padding(.leading, -35)
+                                    }
+                                }
                             }
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                            )
+                            .chartXAxis {
+                                AxisMarks { value in
+                                    AxisTick()
+                                    // AxisValueLabel 제거로 텍스트 숨김
+                                }
+                            }
+                            .chartYScale(domain: yRange ?? 0...1)
                         }
-                        .chartYScale(domain: yRange ?? 0...1)
+                        .frame(height: 360)
+                        .padding(.horizontal)
                     }
-                    .frame(height: 360)
-                    .padding(.horizontal)
-                }
-
-                // 평균선 안내 레이블 (Chart 위에 표시)
-                HStack(spacing: 12) {
-                    Text("5").foregroundColor(.green).opacity(0.6)
-                    Text("20").foregroundColor(.red).opacity(0.6)
-                    Text("60").foregroundColor(.orange).opacity(0.6)
-                    Text("120").foregroundColor(.purple).opacity(0.6)
-                }
-                .font(.caption2)
-                .padding(6)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, -8)
-                // 매수 버튼 및 시장가/지정가 토글
-                HStack {
-                    Spacer()
-                    Button(action: {
-                        guard let entryPriceStr = priceInfo["stck_prpr"]?.replacingOccurrences(of: ",", with: ""),
-                              let entryPrice = Double(entryPriceStr) else {
-                            print("❌ 현재가 변환 실패")
-                            return
+                    
+                    // 평균선 안내 레이블 (Chart 위에 표시)
+                    HStack(spacing: 12) {
+                        Text("5").foregroundColor(.green).opacity(0.6)
+                        Text("20").foregroundColor(.red).opacity(0.6)
+                        Text("60").foregroundColor(.orange).opacity(0.6)
+                        Text("120").foregroundColor(.purple).opacity(0.6)
+                    }
+                    .font(.caption2)
+                    .padding(6)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, -8)
+                    // 매수 버튼 및 시장가/지정가 토글
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            guard let entryPriceStr = priceInfo["stck_prpr"]?.replacingOccurrences(of: ",", with: ""),
+                                  let entryPrice = Double(entryPriceStr) else {
+                                print("❌ 현재가 변환 실패")
+                                return
+                            }
+                            let orderType = appModel.isMarketOrder ? "03" : "00"
+                            let quantity = calculatedQuantity
+                            pendingBuyInfo = (entryPrice: Int(entryPrice), quantity: quantity, orderType: orderType)
+                            showBuyConfirmation = true
+                        }) {
+                            Text("매수")
+                            
                         }
-                        let orderType = appModel.isMarketOrder ? "03" : "00"
-                        let quantity = calculatedQuantity
-                        pendingBuyInfo = (entryPrice: Int(entryPrice), quantity: quantity, orderType: orderType)
-                        showBuyConfirmation = true
-                    }) {
-                        Text("매수")
+                        Text("지정가")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                         
+                        Toggle(isOn:$appModel.isMarketOrder) {
+                            EmptyView()
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: .gray))
+                        .labelsHidden()
+                        .scaleEffect(0.8)
+                        
+                        Text("시장가")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    Text("지정가")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    Toggle(isOn:$appModel.isMarketOrder) {
-                        EmptyView()
-                    }
-                    .toggleStyle(SwitchToggleStyle(tint: .gray))
-                    .labelsHidden()
-                    .scaleEffect(0.8)
-
-                    Text("시장가")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    .padding(.horizontal)
+                    .padding(.bottom, 10)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 10)
+                // (bettingTextResult block moved above)
             }
-            // (bettingTextResult block moved above)
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-        .onChange(of: stock.Code, initial: false) { oldCode, newCode in
-            bettingTextResult = nil
-            fetchCandleData(for: newCode)
-            fetchPriceData(for: newCode)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            .frame(maxHeight: .infinity, alignment: .top)
+            .onChange(of: stock.Code, initial: false) { oldCode, newCode in
+                bettingTextResult = nil
+                fetchCandleData(for: newCode)
+                fetchPriceData(for: newCode)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    calculateBettingSize()
+                }
+            }
+            .onChange(of: appModel.maxLossRatio) { _, _ in
                 calculateBettingSize()
             }
-        }
-        .onChange(of: appModel.maxLossRatio) { _, _ in
-            calculateBettingSize()
-        }
-        .onChange(of: appModel.atrPeriod) { _, _ in
-            calculateBettingSize()
-        }
-        .onChange(of: appModel.totalAsset) { _, _ in
-            calculateBettingSize()
-        }
-        .onAppear {
-            appModel.isMarketOrder = false
-            fetchCandleData(for: stock.Code)
-            fetchPriceData(for: stock.Code)
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                if appModel.totalAsset > 0 {
-                    calculateBettingSize()
-                } else {
-                    print("🔸 총자산 값이 아직 초기화되지 않았습니다. 현재 값: \(appModel.totalAsset)")
+            .onChange(of: appModel.atrPeriod) { _, _ in
+                calculateBettingSize()
+            }
+            .onChange(of: appModel.totalAsset) { _, _ in
+                calculateBettingSize()
+            }
+            .onChange(of: appModel.isPaperTrading) { _, newValue in
+                Task {
+                    print("🌀 모드 전환 감지됨: \(newValue ? "모의투자" : "실전투자")")
+                    appModel.loadSettings()
+                    appModel.loadTotalAssetFromSummary()
+                    fetchCandleData(for: stock.Code)
+                    fetchPriceData(for: stock.Code)
+                    fetchSummary() // ✅ Add this line if not already present
+                    // 총자산 반영 후 계산 딜레이
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        calculateBettingSize()
+                    }
                 }
             }
-        }
-        .alert("매수를 하시겠습니까?", isPresented: $showBuyConfirmation) {
-            Button("확인") {
-                guard let info = pendingBuyInfo else { return }
-                let url = URL(string: "http://127.0.0.1:5051/buy")!
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-
-                let payload: [String: Any] = [
-                    "stock_code": stock.Code,
-                    "price": info.entryPrice,
-                    "quantity": info.quantity,
-                    "order_type": info.orderType,
-                    "atr": atrValue
-                ]
-
-                do {
-                    request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-                } catch {
-                    print("❌ JSON 직렬화 실패: \(error)")
-                    return
+            .onAppear {
+                appModel.isMarketOrder = false
+                fetchCandleData(for: stock.Code)
+                fetchPriceData(for: stock.Code)
+                fetchSummary() // ✅ Add this line
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    if appModel.totalAsset > 0 {
+                        calculateBettingSize()
+                    } else {
+                        print("🔸 총자산 값이 아직 초기화되지 않았습니다. 현재 값: \(appModel.totalAsset)")
+                    }
                 }
-
-                URLSession.shared.dataTask(with: request) { data, response, error in
-                    if let error = error {
-                        print("❌ 매수 요청 에러: \(error)")
+            }
+            .alert("매수를 하시겠습니까?", isPresented: $showBuyConfirmation) {
+                Button("확인") {
+                    guard let info = pendingBuyInfo else { return }
+                    let url = URL(string: "http://127.0.0.1:5051/buy")!
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "POST"
+                    request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+                    
+                    let payload: [String: Any] = [
+                        "stock_code": stock.Code,
+                        "price": info.entryPrice,
+                        "quantity": info.quantity,
+                        "order_type": info.orderType,
+                        "atr": atrValue
+                    ]
+                    
+                    do {
+                        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+                    } catch {
+                        print("❌ JSON 직렬화 실패: \(error)")
                         return
                     }
-                    if let data = data,
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let message = json["message"] as? String {
-                        DispatchQueue.main.async {
-                            alertMessage = message
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                                alertMessage = nil
+                    
+                    URLSession.shared.dataTask(with: request) { data, response, error in
+                        if let error = error {
+                            print("❌ 매수 요청 에러: \(error)")
+                            return
+                        }
+                        if let data = data,
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           let message = json["message"] as? String {
+                            DispatchQueue.main.async {
+                                alertMessage = message
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                    alertMessage = nil
+                                }
                             }
                         }
-                    }
-                }.resume()
-            }
-            Button("취소") { }
-        } message: {
-            if let info = pendingBuyInfo {
-                let totalInvestment = info.entryPrice * info.quantity
-                Text("""
+                    }.resume()
+                }
+                Button("취소") { }
+            } message: {
+                if let info = pendingBuyInfo {
+                    let totalInvestment = info.entryPrice * info.quantity
+                    Text("""
                     종목명: \(stock.Name)
                     종목코드: \(stock.Code)
                     주문수량: \(info.quantity)
@@ -498,45 +513,45 @@ struct ChartsView: View {
                     투입자금: \(formattedNumber("\(adjustToHoga(price: totalInvestment))"))원
                     주문유형: \(info.orderType == "03" ? "시장가 (03)" : "지정가 (00)")
                     """)
-            } else {
-                Text("주문 정보를 불러올 수 없습니다.")
+                } else {
+                    Text("주문 정보를 불러올 수 없습니다.")
+                }
             }
-        }
-        // Alert message view at bottom
-        if let message = alertMessage {
-            VStack {
-                Spacer()
-                Text(message)
-                    .font(.system(size: 10))
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.black.opacity(0.4))
-                    .foregroundColor(.white)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .animation(.easeInOut, value: alertMessage)
+            // Alert message view at bottom
+            if let message = alertMessage {
+                VStack {
+                    Spacer()
+                    Text(message)
+                        .font(.system(size: 10))
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.black.opacity(0.4))
+                        .foregroundColor(.white)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .animation(.easeInOut, value: alertMessage)
+                }
             }
-        }
         }
     }
-
+    
     func fetchCandleData(for code: String) {
         guard let url = URL(string: "http://127.0.0.1:5051/candle?code=\(code)") else {
             print("❌ URL 생성 실패")
             return
         }
-
+        
         URLSession.shared.dataTask(with: url) { data, _, error in
             if let error = error {
                 print("❌ 요청 에러:", error.localizedDescription)
                 return
             }
-
+            
             guard let data = data else {
                 print("❌ 데이터 없음")
                 return
             }
-
+            
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let candleArray = json["candles"] as? [[String: Any]] {
@@ -575,18 +590,18 @@ struct ChartsView: View {
             print("❌ 가격 데이터 URL 생성 실패")
             return
         }
-
+        
         URLSession.shared.dataTask(with: url) { data, _, error in
             if let error = error {
                 print("❌ 가격 데이터 요청 에러:", error.localizedDescription)
                 return
             }
-
+            
             guard let data = data else {
                 print("❌ 가격 데이터 없음")
                 return
             }
-
+            
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: String] {
                     DispatchQueue.main.async {
@@ -603,5 +618,29 @@ struct ChartsView: View {
     func formattedNumber(_ value: String?) -> String {
         guard let value = value, let number = Int(value) else { return value ?? "-" }
         return NumberFormatter.localizedString(from: NSNumber(value: number), number: .decimal)
+    }
+    
+    private func fetchSummary() {
+        print("🧪 fetchSummary() 진입")
+        guard let url = URL(string: "http://127.0.0.1:5051/total_asset/summary") else { return }
+
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data else { return }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: String] {
+                    DispatchQueue.main.async {
+                        self.summary = json
+                        let assetValueStr = json["총평가금액"] ?? "nil"
+                        print("📦 총자산 API 응답: \(assetValueStr)")
+                        if let asset = Int(assetValueStr) {
+                            self.appModel.totalAsset = asset  // ✅ 여기 꼭 필요
+                        }
+                    }
+                }
+            } catch {
+                print("❌ ChartsView fetchSummary 실패: \(error)")
+            }
+        }.resume()
     }
 }

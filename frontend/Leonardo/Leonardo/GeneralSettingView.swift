@@ -12,6 +12,7 @@ struct GeneralSettingView: View {
     @State private var showConfirmation = false
     @State private var pendingToggleValue = true
     @State private var originalPaperTrading = true
+    @State private var toggleSelection = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -27,13 +28,13 @@ struct GeneralSettingView: View {
 
                 if appModel.isSettingsLoaded {
                     Toggle("", isOn: Binding(
-                        get: { appModel.isPaperTrading },
+                        get: { toggleSelection },
                         set: { newValue in
-                            if appModel.isPaperTrading && !newValue {
+                            if toggleSelection && !newValue {
                                 pendingToggleValue = newValue
                                 showConfirmation = true
                             } else {
-                                appModel.isPaperTrading = newValue
+                                toggleSelection = newValue
                             }
                         })
                     )
@@ -43,7 +44,7 @@ struct GeneralSettingView: View {
                     .alert("실전투자로 전환하시겠습니까?", isPresented: $showConfirmation) {
                         Button("취소", role: .cancel) {}
                         Button("확인") {
-                            appModel.isPaperTrading = pendingToggleValue
+                            toggleSelection = pendingToggleValue
                         }
                     }
                 } else {
@@ -62,7 +63,7 @@ struct GeneralSettingView: View {
                         var request = URLRequest(url: url)
                         request.httpMethod = "POST"
                         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                        let body = ["is_paper_trading": appModel.isPaperTrading]
+                        let body = ["is_paper_trading": toggleSelection]
                         request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
                         
                         URLSession.shared.dataTask(with: request) { _, response, error in
@@ -71,11 +72,9 @@ struct GeneralSettingView: View {
                             } else if let httpResponse = response as? HTTPURLResponse {
                                 print("✅ 설정 저장 상태 코드: \(httpResponse.statusCode)")
                                 DispatchQueue.main.async {
-                                    appModel.loadSettings()
-                                    appModel.loadTotalAssetFromSummary()
-                                    appModel.loadWatchlist()
-                                    appModel.loadStockList()
-                                    originalPaperTrading = appModel.isPaperTrading
+                                    originalPaperTrading = toggleSelection
+                                    appModel.isPaperTrading = toggleSelection
+                                    appModel.reloadAllData()
                                 }
                             }
                         }.resume()
@@ -83,7 +82,7 @@ struct GeneralSettingView: View {
                 }) {
                     Text("저장")
                 }
-                .disabled(appModel.isPaperTrading == originalPaperTrading)
+                .disabled(toggleSelection == originalPaperTrading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -91,10 +90,12 @@ struct GeneralSettingView: View {
         .onAppear {
             appModel.loadSettings()
             originalPaperTrading = appModel.isPaperTrading
+            toggleSelection = appModel.isPaperTrading
         }
         .onChange(of: appModel.isSettingsLoaded) { _, newValue in
             if newValue {
                 originalPaperTrading = appModel.isPaperTrading
+                toggleSelection = appModel.isPaperTrading
             }
         }
         Spacer()
