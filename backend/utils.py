@@ -18,6 +18,13 @@ os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 logger.add(LOG_PATH, rotation="10 MB", retention="10 days", encoding="utf-8", enqueue=True)
 import pandas as pd
 
+def create_env_api():
+    with open("cache/settings.json") as f:
+        cfg = json.load(f)
+    env = KoreaInvestEnv(cfg)
+    api = KoreaInvestAPI(cfg, env.get_base_headers())
+    return env, api
+
 class KoreaInvestEnv:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -300,7 +307,6 @@ class KoreaInvestAPI:
             headers["custtype"] = self.custtype
             if DEBUG: logger.debug(f"📡 요청 헤더: {headers}")
             if DEBUG: logger.debug(f"📡 요청 파라미터: {params}")
-
             if is_post_request:
                 if use_hash:
                     self.set_order_hash_key(headers, params)
@@ -370,9 +376,11 @@ class KoreaInvestAPI:
             t1.print_error()
             return dict()
 
-    def get_send_data(self, cmd=None, stockcode=None):
+    def get_send_data(self, cmd=None, stock_code=None):
         # 1. 주식호가, 2.주식호가해제, 3.주식체결, 4.주식체결해제, 5.주식체결통보(고객), 6.주식체결통보해제(고객), 7.주식체결통보(모의), 8.주식체결통보해제(모의)
         # 입력값 체크 step
+        logger.debug(f"websocket_approval_key: {self.websocket_approval_key}")
+
         assert 0 < cmd < 9, f"Wrong Input Data: {cmd}"
 
         #입력값에 따라 전송 데이터셋 구분 처리
@@ -401,10 +409,27 @@ class KoreaInvestAPI:
             tr_id = 'H0STCNI9'  # 테스트용 직원체결통보
             tr_type = '2'
 
+        # send json, 체결통보는 tr_key 입력항목이 상이하므로 분리를 한다.
+        if cmd in (5, 6, 7, 8):
+            senddata = (
+                '{"header":{"approval_key":"' + self.websocket_approval_key +
+                '","custtype":"' + self.custtype +
+                '","tr_type":"' + tr_type +
+                '","content-type":"utf-8"},'
+                '"body":{"input":{"tr_id":"' + tr_id +
+                '","tr_key":"' + self.htsid + '"}}}'
+            )
+        else:
+            senddata = (
+                '{"header":{"approval_key":"' + self.websocket_approval_key +
+                '","custtype":"' + self.custtype +
+                '","tr_type":"' + tr_type +
+                '","content-type":"utf-8"},'
+                '"body":{"input":{"tr_id":"' + tr_id +
+                '","tr_key":"' + stock_code + '"}}}'
+            )
+        return senddata
 
-        # # send json, 체결통보는 tr_key 입력항목이 상이하므로 분리를 한다.
-        # if cmd in (5, 6, 7, 8):
-        #     senddata = '{"header":{"approval_key":"' + self.q_approval_key + '","personalseckey":"' + self.q_personalsecKey + '","custtype":"' + self.custtype + '","tr_type":' + tr_type +
 
     def get_holdings_detailed(self):
         url = "/uapi/domestic-stock/v1/trading/inquire-balance"
@@ -568,10 +593,3 @@ class APIResponse:
         if DEBUG: logger.info(f"{self.get_body().rt_cd}, {self.get_error_code()}, {self.get_error_message()}")
         if DEBUG: logger.info(f"---------------------------------")
     # (Method removed: get_order_detail)
-
-def create_env_api():
-    with open("cache/settings.json") as f:
-        cfg = json.load(f)
-    env = KoreaInvestEnv(cfg)
-    api = KoreaInvestAPI(cfg, env.get_base_headers())
-    return env, api
