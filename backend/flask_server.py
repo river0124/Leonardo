@@ -1,28 +1,36 @@
 # flask_server.py
+
+from flask import Flask, jsonify, request, Response
+import threading
+import asyncio
+import sys
 import json
 import datetime
 import os
 import pandas as pd
-from flask import Flask, request, jsonify, Response
 from cryptography.fernet import Fernet
-from trade_manager import TradeManager
-# import logging # app.logger.setLevel을 사용하려면 필요
 
+
+# 모듈 import (현재 사용하지 않더라도 유지)
 from get_asset import get_total_asset
 from get_candle_data import get_candle_chart_data
 from watchlist_store import load_watchlist, add_code_to_watchlist, remove_code_from_watchlist
 from utils import KoreaInvestEnv, KoreaInvestAPI
 from stock_name_finder import get_stock_name_by_code
+from trade_manager import TradeManager
+from trade_listener import TradeListener
+from websocket_manager import websocket_manager
+from settings import load_settings, save_settings
+from loguru import logger
 
-DEBUG = 0  # Set to 1 to enable print, 0 to disable
-
+# --- 경로 설정 ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
 STOCK_LIST_CSV = os.path.join(CACHE_DIR, "stock_list.csv")
-
-# Fernet encryption setup
 FERNET_KEY_FILE = os.path.join(CACHE_DIR, "key.secret")
+
+# --- 암호화 키 준비 ---
 if os.path.exists(FERNET_KEY_FILE):
     with open(FERNET_KEY_FILE, "rb") as f:
         FERNET_KEY = f.read()
@@ -33,72 +41,80 @@ else:
         f.write(FERNET_KEY)
 fernet = Fernet(FERNET_KEY)
 
-# Flask 앱 초기화
+# --- Flask 앱 초기화 ---
 app = Flask(__name__)
 
+# --- 비동기 큐 및 이벤트 루프 설정 ---
+execution_queue = asyncio.Queue()
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
-# 로깅 레벨 설정 (선택 사항)
-# if DEBUG:
-#     app.logger.setLevel(logging.DEBUG)
-# else:
-#     app.logger.setLevel(logging.INFO)
-
-# 설정 불러오기
-def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                settings = json.load(f)
-            # Decrypt sensitive fields
-            for key in ["api_key", "access_token"]:
-                if key in settings and isinstance(settings[key], str):
-                    try:
-                        settings[key] = fernet.decrypt(settings[key].encode()).decode()
-                    except Exception:
-                        pass  # If not decryptable, leave as is
-            return settings
-        except json.JSONDecodeError:
-            app.logger.warning(f"Warning: Could not decode JSON from {SETTINGS_FILE}. Returning empty settings.")
-            return {}
-    return {}
-
-
-# Helper function for saving settings (wraps original logic)
-def save_settings_to_file(settings_dict: dict):
-    current_settings = load_settings()
-
-    # 민감 정보 암호화
-    for key in ["api_key", "access_token"]:
-        if key in settings_dict and isinstance(settings_dict[key], str):
-            settings_dict[key] = fernet.encrypt(settings_dict[key].encode()).decode()
-
-    # 기존 설정 유지하며 덮어쓰기 (is_paper_trading만 따로 처리하지 않음)
-    merged_settings = {**current_settings, **settings_dict}
-
-    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(merged_settings, f, indent=2, ensure_ascii=False)
-
-
-# 초기 설정 및 API 객체 생성
+# 디버깅 모드 설정
 cfg = load_settings()
+DEBUG = cfg.get("DEBUG", "False").lower() == "true"
 if DEBUG:
-    print("🐞 cfg loaded:", cfg)
+    logger.info("🐞 cfg 로딩 완료: {}", cfg)
 
-env = KoreaInvestEnv(cfg)
-api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers())
-trade_manager = TradeManager(api, cfg)
+logger.remove()
+logger.add(sys.stderr, level="DEBUG" if DEBUG else "WARNING")
 
-# 주식 목록 CSV 파일 로드
+# --- 주문 유효성 검사 도우미 ---
+def validate_order_request(data, require_atr=False):
+    if not data:
+        return False, "요청 본문이 비어있거나 JSON 형식이 아닙니다."
+    stock_code = data.get("stock_code")
+    quantity_str = data.get("quantity")
+    price_str = data.get("price")
+    order_type = data.get("order_type")
+    atr_str = data.get("atr") if require_atr else None
+
+    missing_fields = []
+    if not stock_code: missing_fields.append("stock_code")
+    if quantity_str is None: missing_fields.append("quantity")
+    if price_str is None: missing_fields.append("price")
+    if not order_type: missing_fields.append("order_type")
+    if require_atr and atr_str is None: missing_fields.append("atr")
+
+    if missing_fields:
+        return False, f"필수 필드 누락: {', '.join(missing_fields)}"
+
+    try:
+        quantity = int(quantity_str)
+        price = str(price_str)
+        if quantity <= 0:
+            return False, "수량은 0보다 커야 합니다."
+    except ValueError:
+        return False, "수량 또는 가격 형식이 올바르지 않습니다."
+
+    if require_atr:
+        try:
+            atr = float(atr_str)
+        except ValueError:
+            return False, "ATR 값이 숫자가 아닙니다."
+    else:
+        atr = None
+
+    return True, {
+        "stock_code": stock_code,
+        "quantity": quantity,
+        "price": price,
+        "order_type": order_type,
+        "atr": atr
+    }
+
+# approval_key = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers()).websocket_approval_key
+# api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers(), websocket_approval_key=approval_key)
+# trade_manager = TradeManager(api, cfg, approval_key=approval_key)
+
+# --- 주식 리스트 로드 ---
 try:
     stock_df = pd.read_csv(STOCK_LIST_CSV, dtype=str)
 except FileNotFoundError:
-    app.logger.error(f"Fatal: Stock list file not found at {STOCK_LIST_CSV}. Some functionalities might not work.")
-    stock_df = pd.DataFrame(columns=['Code', 'Name'])  # 빈 DataFrame으로 초기화하여 이후 코드 실행 보장
-except Exception as e:
-    app.logger.error(f"Fatal: Error loading stock list {STOCK_LIST_CSV}: {e}")
+    logger.error(f"📛 주식 리스트 파일이 존재하지 않습니다: {STOCK_LIST_CSV}")
     stock_df = pd.DataFrame(columns=['Code', 'Name'])
-
+except Exception as e:
+    logger.error(f"📛 주식 리스트 파일 로딩 실패: {e}")
+    stock_df = pd.DataFrame(columns=['Code', 'Name'])
 
 @app.route('/candle', methods=['GET'])
 def candle():
@@ -128,7 +144,7 @@ def candle():
         result["candles"] = valid_candles
         return jsonify(result), 200
     except Exception as e:
-        app.logger.error(f"Error in /candle for code {code}: {str(e)}", exc_info=True)
+        logger.error(f"Error in /candle for code {code}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -142,7 +158,7 @@ def asset():
         # 클라이언트가 문자열을 기대한다면 str(total_asset)이 맞습니다.
         return jsonify({"balance": total_asset})
     except Exception as e:
-        app.logger.error(f"Error in /asset: {str(e)}", exc_info=True)
+        logger.error(f"Error in /asset: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -154,10 +170,10 @@ def high52():
             data = json.load(f)
         return jsonify(data), 200
     except FileNotFoundError:
-        app.logger.warning(f"/high52: high52.json not found.")
+        logger.warning(f"/high52: high52.json not found.")
         return jsonify({"error": "52주 신고가 데이터를 찾을 수 없습니다."}), 404
     except Exception as e:
-        app.logger.error(f"Error in /high52: {str(e)}", exc_info=True)
+        logger.error(f"Error in /high52: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -177,7 +193,7 @@ def get_price():
             stock_name = names_series.iloc[0] if not names_series.empty else "정보없음"
         else:
             stock_name = "정보없음 (목록 확인 필요)"
-            app.logger.warning("Stock dataframe is empty or missing columns for name lookup in /price.")
+            logger.warning("Stock dataframe is empty or missing columns for name lookup in /price.")
 
         filtered_data = {
             "name": stock_name,
@@ -197,7 +213,7 @@ def get_price():
             content_type='application/json; charset=utf-8'
         )
     except Exception as e:
-        app.logger.error(f"Error in /price for stock_no {stock_no}: {str(e)}", exc_info=True)
+        logger.error(f"Error in /price for stock_no {stock_no}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -222,7 +238,7 @@ def watchlist():
             return jsonify({"message": f"{code} removed from watchlist."}), 200
 
     except Exception as e:
-        app.logger.error(f"Error in /watchlist: {str(e)}", exc_info=True)
+        logger.error(f"Error in /watchlist: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -241,8 +257,6 @@ def stockname():
         return jsonify({"error": f"Stock name not found for code {code}"}), 404
 
 
-
-
 # Combined GET and POST /settings route to support retrieving and saving settings
 @app.route("/settings", methods=["GET", "POST"])
 def settings():
@@ -252,18 +266,19 @@ def settings():
             if not settings:
                 return jsonify({"error": "Invalid settings data"}), 400
 
-            save_settings_to_file(settings)
+            save_settings(settings)
 
             global env, api, trade_manager
             cfg = load_settings()
             env = KoreaInvestEnv(cfg)
-            api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers())
-            trade_manager = TradeManager(api, cfg)
 
-            app.logger.debug(f"⚙️ Settings updated. Mode: {'모의투자' if cfg.get('is_paper_trading') else '실전투자'}")
+            api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers(), websocket_approval_key=approval_key)
+            trade_manager = TradeManager(api, cfg, approval_key=approval_key)
+
+            logger.debug(f"⚙️ Settings updated. Mode: {'모의투자' if cfg.get('is_paper_trading') else '실전투자'}")
             return jsonify({"message": "Settings saved successfully"}), 200
         except Exception as e:
-            app.logger.error(f"Error saving settings: {e}", exc_info=True)
+            logger.error(f"Error saving settings: {e}", exc_info=True)
             return jsonify({"error": "Failed to save settings"}), 500
 
     elif request.method == "GET":
@@ -271,9 +286,8 @@ def settings():
             cfg = load_settings()
             return jsonify(cfg), 200
         except Exception as e:
-            app.logger.error(f"Error loading settings: {e}", exc_info=True)
+            logger.error(f"Error loading settings: {e}", exc_info=True)
             return jsonify({"error": "Failed to load settings"}), 500
-
 
 
 @app.route('/holdings/detail', methods=['GET'])
@@ -309,7 +323,7 @@ def holdings_detail():
             "is_empty": len(stocks_list) == 0
         }), 200
     except Exception as e:
-        app.logger.error(f"Error in /holdings/detail: {str(e)}", exc_info=True)
+        logger.error(f"Error in /holdings/detail: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -332,7 +346,7 @@ def get_holdings():
 
         return jsonify(stocks_list), 200
     except Exception as e:
-        app.logger.error(f"Error in /holdings: {str(e)}", exc_info=True)
+        logger.error(f"Error in /holdings: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -340,11 +354,11 @@ def get_holdings():
 def get_stock_list():
     try:
         if stock_df.empty:
-            app.logger.warning("/stock/list: Global stock_df is empty.")
+            logger.warning("/stock/list: Global stock_df is empty.")
             return jsonify({"error": "주식 목록 데이터를 사용할 수 없습니다."}), 503  # Service Unavailable
 
         if not {'Code', 'Name'}.issubset(stock_df.columns):
-            app.logger.error("/stock/list: Global stock_df is missing 'Code' or 'Name' columns.")
+            logger.error("/stock/list: Global stock_df is missing 'Code' or 'Name' columns.")
             return jsonify({"error": "주식 목록 데이터 형식이 올바르지 않습니다."}), 500
 
         # 전역 stock_df 사용
@@ -357,7 +371,7 @@ def get_stock_list():
             content_type='application/json; charset=utf-8'
         )
     except Exception as e:
-        app.logger.error(f"Error in /stock/list: {str(e)}", exc_info=True)
+        logger.error(f"Error in /stock/list: {str(e)}", exc_info=True)
         return jsonify({"error": "주식 목록을 가져오는 중 오류 발생"}), 500
 
 
@@ -391,106 +405,8 @@ def total_asset_summary():
             content_type='application/json; charset=utf-8'
         )
     except Exception as e:
-        app.logger.error(f"Error in /total_asset/summary: {str(e)}", exc_info=True)
+        logger.error(f"Error in /total_asset/summary: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-
-
-@app.route('/buy', methods=['POST'])
-def buy_stock():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"success": False, "message": "요청 본문이 비어있거나 JSON 형식이 아닙니다."}), 400
-
-        stock_code = data.get("stock_code")
-        quantity_str = data.get("quantity")
-        price_str = data.get("price")
-        order_type = data.get("order_type")
-
-        missing_fields = []
-        if not stock_code: missing_fields.append("stock_code")
-        if quantity_str is None: missing_fields.append("quantity")
-        if price_str is None: missing_fields.append("price")
-        if not order_type: missing_fields.append("order_type")
-
-        if missing_fields:
-            return jsonify({"success": False, "message": f"필수 필드 누락: {', '.join(missing_fields)}"}), 400
-
-        try:
-            quantity = int(quantity_str)
-            price = str(price_str)
-            if quantity <= 0:
-                return jsonify({"success": False, "message": "수량은 0보다 커야 합니다."}), 400
-        except ValueError:
-            return jsonify({"success": False, "message": "수량 또는 가격 형식이 올바르지 않습니다."}), 400
-
-        atr_str = data.get("atr")
-        if atr_str is None:
-            return jsonify({"success": False, "message": "ATR 값이 누락되었습니다."}), 400
-
-        try:
-            atr = float(atr_str)
-        except ValueError:
-            return jsonify({"success": False, "message": "ATR 값이 숫자가 아닙니다."}), 400
-
-        result = trade_manager.place_order_with_stoploss(stock_code, quantity, price, atr, order_type)
-
-        if "error" in result:
-            return jsonify({"success": False, "message": result["error"]}), 500
-
-        return jsonify({
-            "success": True,
-            "message": "매수 요청이 정상적으로 처리되었습니다.",
-            "data": result
-        }), 200
-    except Exception as e:
-        app.logger.error(f"Unhandled exception in /buy: {str(e)}", exc_info=True)
-        return jsonify({"success": False, "message": f"서버 처리 중 예외 발생: {str(e)}"}), 500
-
-@app.route('/sell', methods=['POST'])
-def sell_stock():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"success": False, "message": "요청 본문이 비어있거나 JSON 형식이 아닙니다."}), 400
-
-        stock_code = data.get("stock_code")
-        quantity_str = data.get("quantity")
-        price_str = data.get("price")
-        order_type = data.get("order_type")
-
-        missing_fields = []
-        if not stock_code: missing_fields.append("stock_code")
-        if quantity_str is None: missing_fields.append("quantity")
-        if price_str is None: missing_fields.append("price")
-        if not order_type: missing_fields.append("order_type")
-
-        if missing_fields:
-            return jsonify({"success": False, "message": f"필수 필드 누락: {', '.join(missing_fields)}"}), 400
-
-        try:
-            quantity = int(quantity_str)
-            price = str(price_str)
-            if quantity <= 0:
-                return jsonify({"success": False, "message": "수량은 0보다 커야 합니다."}), 400
-        except ValueError:
-            return jsonify({"success": False, "message": "수량 또는 가격 형식이 올바르지 않습니다."}), 400
-
-        response = api.do_sell(stock_code, quantity, price, order_type)
-
-        if response and response.is_ok():
-            return jsonify({
-                "success": True,
-                "message": "매도 요청이 정상적으로 처리되었습니다.",
-                "data": response.get_body()
-            }), 200
-        else:
-            error_msg = response.get_error_message() if response else "API 응답 없음"
-            return jsonify({"success": False, "message": f"매도 요청 실패: {error_msg}"}), 500
-
-    except Exception as e:
-        app.logger.error(f"Unhandled exception in /sell: {str(e)}", exc_info=True)
-        return jsonify({"success": False, "message": f"서버 처리 중 예외 발생: {str(e)}"}), 500
 
 
 # ---- MARKET OPEN STATUS ROUTE ----
@@ -524,17 +440,74 @@ def is_market_open():
         return jsonify({"market_open": True}), 200
 
     except Exception as e:
-        app.logger.error(f"Error in /market/is_open: {str(e)}", exc_info=True)
+        logger.error(f"Error in /market/is_open: {str(e)}", exc_info=True)
         return jsonify({"market_open": False, "error": str(e)}), 500
 
-# ---- RISK STATUS ROUTE ----
-@app.route('/risk_status', methods=['GET'])
-def risk_status():
-    return jsonify(trade_manager.export_risk_state())
+
+@app.route('/buy', methods=['POST'])
+def buy_stock():
+    try:
+        is_valid, result = validate_order_request(request.get_json(), require_atr=True)
+        if not is_valid:
+            return jsonify({"success": False, "message": result}), 400
+
+        order = result
+        logger.debug(f"[BUY API] 주문 요청 데이터: {json.dumps(order, ensure_ascii=False)}")
+        asyncio.run_coroutine_threadsafe(
+            execution_queue.put({
+                "type": "buy",
+                "stock_code": order["stock_code"],
+                "qty": order["quantity"],
+                "price": order["price"],
+                "atr": order["atr"],
+                "order_type": order["order_type"]
+            }),
+            loop
+        )
+
+        logger.info(f"📥 매수 주문 큐에 등록됨: {order['stock_code']} | 수량: {order['quantity']} | 가격: {order['price']} | ATR: {order['atr']}")
+
+        return jsonify({
+            "success": True,
+            "message": "매수 요청이 큐에 등록되었습니다. 체결 대기 중입니다."
+        }), 202
+    except Exception as e:
+        logger.error(f"Unhandled exception in /buy: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": f"서버 처리 중 예외 발생: {str(e)}"}), 500
 
 
+# --- 앱 실행 ---
 if __name__ == '__main__':
-    # SSL 사용 시: app.run(host='0.0.0.0', port=5051, ssl_context=('path/to/cert.pem', 'path/to/key.pem'))
-    import threading
-    threading.Thread(target=trade_manager.monitor_order_fill, daemon=True).start()
-    app.run(host='0.0.0.0', port=5051, debug=bool(DEBUG))  # Flask의 debug 모드를 DEBUG 변수와 연동
+    from websocket_manager import Websocket_Manager, websocket_manager
+
+    # ✅ KoreaInvestEnv 객체를 먼저 명시적으로 생성
+    env = KoreaInvestEnv(cfg)
+
+    # ✅ API 객체 생성 (승인키를 명시적으로 넘김)
+    api = KoreaInvestAPI(
+        cfg=cfg,
+        base_headers=env.get_base_headers(),
+        websocket_approval_key=cfg['websocket_approval_key']
+    )
+
+    # Websocket_Manager 인스턴스 생성
+    global websocket_manager
+    websocket_manager = Websocket_Manager(cfg, cfg['websocket_approval_key'])
+
+    trade_manager = TradeManager(
+        api=api,
+        cfg=cfg,
+        approval_key=cfg['websocket_approval_key'],
+        execution_queue=execution_queue,
+        websocket_manager=websocket_manager
+    )
+    trade_listener = TradeListener(cfg, trade_manager=trade_manager, api=api)
+    #
+    # # 비동기 작업 등록
+    loop.create_task(trade_manager.process_execution_queue())
+
+    # asyncio 이벤트 루프를 백그라운드 스레드에서 실행
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+
+    # Flask 서버 실행 (메인 스레드에서 실행, 자동 재시작 비활성화)
+    app.run(debug=True, use_reloader=False)

@@ -1,14 +1,19 @@
 import copy
 import json
 import time
-import os
 from collections import namedtuple
+import traceback
 
 import requests
 from loguru import logger
+import os
+from settings import cfg
 
-DEBUG = 0  # 0이면 로그와 print 비활성화, 1이면 활성화
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_DIR = os.path.join(BASE_DIR, "cache")
+SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
 
+DEBUG = cfg.get("DEBUG", "False").lower() == "true"
 
 # 로그 경로를 현재 파일(__file__) 기준으로 안전하게 구성
 LOG_PATH = os.path.join(os.path.dirname(__file__), "logs", "trading_{time:YYYY-MM-DD}.log")
@@ -29,19 +34,19 @@ class KoreaInvestEnv:
     def __init__(self, cfg):
         self.cfg = cfg
         self.custtype = cfg.get('custtype', 'P')
+        self.api_key = cfg["api_key"]
+        self.api_secret_key = cfg["api_secret_key"]
         self.base_headers = {
             "content_Type": "application/json",
             "Accept": "text/plain",
             "charset": "UTF-8",
             "User_Agent": cfg.get("my_agent", "")
         }
-        # Maintain both real and paper access tokens
-        self.access_token_real = None
-        self.access_token_paper = None
-        # Initialize self.access_token for base_headers logic
-        self.access_token = None
-        is_paper_trading = cfg.get("is_paper_trading", True)
-        if is_paper_trading:
+        # Remove file-based token logic; just set access_token from cfg
+        self.is_paper_trading = cfg.get("is_paper_trading", True)
+        self.access_token = cfg["papertoken"] if self.is_paper_trading else cfg["realtoken"]
+
+        if self.is_paper_trading:
             using_url = cfg.get("paper_url", "")
             api_key = cfg.get("paper_api_key", "")
             api_secret_key = cfg.get("paper_api_secret_key", "")
@@ -51,10 +56,19 @@ class KoreaInvestEnv:
             api_key = cfg.get("api_key", "")
             api_secret_key = cfg.get("api_secret_key", "")
             account_num = cfg.get("stock_account_number", "")
-        websocket_approval_key = self.get_websocket_approval_key(using_url, api_key, api_secret_key)
-        account_access_token = self.get_account_access_token(using_url, api_key, api_secret_key)
-        if DEBUG: logger.debug(f"🎫 선택된 토큰: {'token_paper.json' if is_paper_trading else 'token_real.json'}")
-        self.base_headers["authorization"] = self.get_access_token()
+
+        self.request_base_url = cfg["paper_url"] if self.is_paper_trading else cfg["url"]
+        logger.debug(f"📡 [__init__] request_base_url 설정됨: {self.request_base_url}")
+        websocket_approval_key = cfg.get("websocket_approval_key")
+        if websocket_approval_key:
+            logger.info(f"🪪 [__init__] 외부 전달된 approval_key 사용: {websocket_approval_key}")
+        else:
+            logger.warning("❗ cfg에 approval_key 없음 – 직접 발급 시도")
+            websocket_approval_key = self.get_websocket_approval_key()
+        self.cfg["websocket_approval_key"] = websocket_approval_key
+        # No need to call get_account_access_token (file-based); use access_token from cfg
+        if DEBUG: logger.debug(f"🎫 선택된 access_token: {'papertoken' if self.is_paper_trading else 'realtoken'} from cfg")
+        self.base_headers["authorization"] = self.access_token
         # Debug: show which token file is selected
         # (already logged above)
         self.base_headers["appkey"] = api_key
@@ -65,113 +79,86 @@ class KoreaInvestEnv:
 
     def get_base_headers(self):
         headers = self.base_headers.copy()
-        if "authorization" not in headers or headers["authorization"] is None:
-            self.access_token = self.get_access_token()
-            if self.access_token is None:
-                self.access_token = self.get_account_access_token(
-                    self.cfg.get("paper_url") if self.cfg.get("is_paper_trading", True) else self.cfg.get("url"),
-                    self.cfg.get("paper_api_key") if self.cfg.get("is_paper_trading", True) else self.cfg.get("api_key"),
-                    self.cfg.get("paper_api_secret_key") if self.cfg.get("is_paper_trading", True) else self.cfg.get("api_secret_key")
-                )
-            if DEBUG: logger.debug("🔑 발급된 access_token: %s", self.access_token)
-            headers["authorization"] = self.access_token
+        # Always use the access_token from cfg (already set in self.access_token)
+        headers["authorization"] = self.access_token
         return headers
 
     def get_full_config(self):
         return copy.deepcopy(self.cfg)
 
     def get_account_access_token(self, request_base_url="", api_key="", api_secret_key=""):
-        cfg = self.cfg
-        token_path = os.path.join("cache", "token_paper.json") if cfg.get("is_paper_trading", True) else os.path.join("cache", "token_real.json")
-        # Debug: print selected token file path
-        if DEBUG: logger.debug(f"🗂️ 토큰 저장 파일 경로: {token_path}")
-
-        # Respect is_paper_trading and set request_base_url accordingly if not provided
-        if not request_base_url:
-            request_base_url = cfg.get("paper_url", "") if cfg.get("is_paper_trading", True) else cfg.get("url", "")
-
-        # 기존 토큰이 존재하고 23시간 내면 재사용
-        if os.path.exists(token_path):
-            with open(token_path, "r") as f:
-                token_data = json.load(f)
-                if time.time() - token_data.get("timestamp", 0) < 23 * 3600:
-                    if DEBUG: logger.debug(f"♻️ 재사용 access_token from {token_path}: {token_data['token']}")
-                    self.access_token = token_data["token"]
-                    return token_data["token"]
-
-        # 새로 발급
-        p = {
-            "grant_type": "client_credentials",
-            "appkey": api_key,
-            "appsecret": api_secret_key
-        }
-        url = f'{request_base_url}/oauth2/tokenP'
-        # Use minimal headers for token request
-        res = requests.post(url, data=json.dumps(p), headers={"content-type": "application/json"})
-        res.raise_for_status()
-        my_token = res.json()["access_token"]
-        if DEBUG: logger.debug(f"access_token: {my_token}")
-        bearer_token = f"Bearer {my_token}"
-
-        # 파일 저장
-        with open(token_path, "w") as f:
-            json.dump({"token": bearer_token, "timestamp": time.time()}, f)
-
-        # Store in appropriate attribute
-        if request_base_url == self.cfg.get("paper_url", ""):
-            self.access_token_paper = bearer_token
-        else:
-            self.access_token_real = bearer_token
-
-        # Ensure base headers are updated with the correct token
-        self.base_headers["authorization"] = bearer_token
-        # Debug: print stored access_token
-        if DEBUG: logger.debug(f"✅ 저장된 access_token: {bearer_token}")
-        self.access_token = bearer_token
-
-        return bearer_token
+        # Now always load from cfg, no file or API request
+        access_token = self.cfg["papertoken"] if self.is_paper_trading else self.cfg["realtoken"]
+        if DEBUG: logger.debug(f"🔑 get_account_access_token: loaded {'papertoken' if self.is_paper_trading else 'realtoken'} from cfg")
+        self.access_token = access_token
+        self.base_headers["authorization"] = access_token
+        return access_token
 
     def get_access_token(self):
-        if self.cfg.get("is_paper_trading", True):
-            paper_token_path = os.path.join("cache", "token_paper.json")
-            if not self.access_token_paper and os.path.exists(paper_token_path):
-                with open(paper_token_path, "r") as f:
-                    self.access_token_paper = json.load(f)["token"]
-                    if DEBUG: logger.debug(f"📥 불러온 access_token (paper): {self.access_token_paper}")
-            self.access_token = self.access_token_paper
-            return self.access_token_paper
-        else:
-            real_token_path = os.path.join("cache", "token_real.json")
-            if not self.access_token_real and os.path.exists(real_token_path):
-                with open(real_token_path, "r") as f:
-                    self.access_token_real = json.load(f)["token"]
-                    if DEBUG: logger.debug(f"📥 불러온 access_token (real): {self.access_token_real}")
-            self.access_token = self.access_token_real
-            return self.access_token_real
+        # Always load from cfg
+        access_token = self.cfg["papertoken"] if self.is_paper_trading else self.cfg["realtoken"]
+        if DEBUG: logger.debug(f"📥 get_access_token: loaded {'papertoken' if self.is_paper_trading else 'realtoken'} from cfg")
+        self.access_token = access_token
+        return access_token
 
-    def get_websocket_approval_key(self, request_base_url="", api_key="", api_secret_key=""):
-        if DEBUG: logger.debug(f"🧩 get_websocket_approval_key 호출됨 - request_base_url: {request_base_url}, api_key: {api_key}, api_secret_key: {api_secret_key}")
+    def get_websocket_approval_key(self):
+        logger.debug("[get_websocket_approval_key] 🔁 함수 호출됨")
+        if self.is_paper_trading:
+            appkey = self.cfg["paper_api_key"]
+            secretkey = self.cfg["paper_api_secret_key"]
+            request_base_url = self.cfg["paper_url"]
+        else:
+            appkey = self.cfg["api_key"]
+            secretkey = self.cfg["api_secret_key"]
+            request_base_url = self.cfg["url"]
+
+        request_url = f"{request_base_url}/oauth2/Approval"
         headers = {"content-type": "application/json"}
         body = {
             "grant_type": "client_credentials",
-            "appkey": api_key,
-            "secretkey": api_secret_key
+            "appkey": appkey,
+            "secretkey": secretkey
         }
-        url = f'{request_base_url}/oauth2/Approval'
-        if DEBUG: logger.debug(f"🔗 최종 Approval URL: {url}")
-        res = requests.post(url, headers=headers, data=json.dumps(body))
-        approval_key = res.json()["approval_key"]
-        return approval_key
+
+        logger.info(f"🔑 [get_websocket_approval_key] 최종 요청 URL: {request_url}")
+        logger.info(f"🔐 [get_websocket_approval_key] appkey: {appkey}, secretkey: {secretkey}")
+
+        res = requests.post(request_url, headers=headers, data=json.dumps(body))
+
+        try:
+            data = res.json()
+        except Exception as e:
+            logger.error(f"❌ JSON 파싱 실패: {e}, 응답 텍스트: {res.text}")
+            return None
+
+        logger.info(f"📦 승인 응답 데이터: {data}")
+
+        if res.status_code != 200:
+            logger.error(f"❌ [웹소켓 승인 요청 실패] HTTP {res.status_code} - {data}")
+            return None
+
+        if "approval_key" not in data:
+            logger.error(f"❌ approval_key 누락 - 응답 데이터: {data}")
+            return None
+
+        return data["approval_key"]
 
 class KoreaInvestAPI:
-    def __init__(self, cfg, base_headers):
+    def __init__(self, cfg, base_headers, websocket_approval_key=None):
+        logger.debug("💥 KoreaInvestAPI __init__ 진입")
+        logger.debug(f"websocket_approval_key 인자: {websocket_approval_key}")
+        logger.debug(f"cfg로부터 approval_key: {cfg.get('approval_key')}")
+        self.cfg = cfg
         self.custtype = cfg.get("custtype", "P")
         self._base_headers = base_headers
-        self.websocket_approval_key = cfg.get("websocket_approval_key", "")
-        self.account_num = cfg.get("account_num", "")
         self.is_paper_trading = cfg.get("is_paper_trading", True)
+        self.websocket_url = cfg["paper_websocket_url"] if self.is_paper_trading else cfg["websocket_url"]
+        self.using_url = self.cfg["paper_url"] if self.is_paper_trading else self.cfg["url"]
+        # Remove get_websocket_approval_key from KoreaInvestAPI; rely on passed or cfg.
+        self.websocket_approval_key = websocket_approval_key or cfg.get("approval_key")
+        logger.debug(f"🧩 approval_key source: direct: {websocket_approval_key}, from cfg: {cfg.get('approval_key')}")
+        self.account_num = cfg.get("account_num", "")
         self.htsid = cfg.get("htsid", "")
-        self.using_url = cfg.get("using_url", "")
 
     def set_order_hash_key(self, h, p):
         # 주문 API에서 사용할 hash key값을 받아 header에 설정해 주는 함수
@@ -530,12 +517,9 @@ class KoreaInvestAPI:
 
     def refresh_access_token(self):
         if DEBUG: logger.info("🔁 토큰 갱신 시작")
-        is_paper = self.cfg.get("is_paper_trading", True)
-        api_key = self.cfg.get("paper_api_key" if is_paper else "api_key")
-        api_secret_key = self.cfg.get("paper_api_secret_key" if is_paper else "api_secret_key")
-        using_url = self.cfg.get("paper_url" if is_paper else "url")
-
-        new_token = self.get_account_access_token(using_url, api_key, api_secret_key)
+        self.is_paper_trading = self.cfg.get("is_paper_trading", True)
+        new_token = self.cfg["papertoken"] if self.is_paper_trading else self.cfg["realtoken"]
+        self.access_token = new_token
         self.base_headers["authorization"] = new_token
         if DEBUG: logger.info("✅ 토큰 갱신 완료")
 
