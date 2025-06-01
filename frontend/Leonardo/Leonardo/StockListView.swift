@@ -8,7 +8,7 @@ class StockViewModel: ObservableObject {
     }
 
     func loadStockData() {
-        guard let url = URL(string: "http://127.0.0.1:5051/high52") else {
+        guard let url = URL(string: "http://127.0.0.1:5000/high52") else {
             print("❌ URL 생성 실패")
             return
         }

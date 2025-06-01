@@ -48,7 +48,7 @@ class AppModel: ObservableObject {
 
 
     func applyTradingModeAndReload() {
-        guard let url = URL(string: "http://127.0.0.1:5051/settings") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/settings") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, error in
             if let data = data {
@@ -68,7 +68,7 @@ class AppModel: ObservableObject {
     }
 
     func loadSettings(completion: (() -> Void)? = nil) {
-        guard let url = URL(string: "http://127.0.0.1:5051/settings") else {
+        guard let url = URL(string: "http://127.0.0.1:5000/settings") else {
             completion?()
             return
         }
@@ -99,7 +99,7 @@ class AppModel: ObservableObject {
     }
 
     func fetchWatchlist() {
-        guard let url = URL(string: "http://127.0.0.1:5051/watchlist") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/watchlist") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, error in
             if let data = data {
@@ -122,7 +122,7 @@ class AppModel: ObservableObject {
 
     @MainActor
     func addToWatchlist(code: String) async {
-        guard let url = URL(string: "http://127.0.0.1:5051/watchlist") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/watchlist") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -144,7 +144,7 @@ class AppModel: ObservableObject {
 
     @MainActor
     func removeFromWatchlist(code: String) async {
-        guard let url = URL(string: "http://127.0.0.1:5051/watchlist") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/watchlist") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
@@ -163,7 +163,7 @@ class AppModel: ObservableObject {
     }
 
     func loadStockList() {
-        guard let url = URL(string: "http://127.0.0.1:5051/stock/list") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/stock/list") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, error in
             if let data = data {
@@ -189,7 +189,7 @@ class AppModel: ObservableObject {
     }
 
     func loadTotalAssetFromSummary() {
-        guard let url = URL(string: "http://127.0.0.1:5051/total_asset/summary") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/total_asset/summary") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, error in
             if let data = data {
@@ -214,7 +214,7 @@ class AppModel: ObservableObject {
     }
     
     func fetchStockInfo(code: String) {
-        guard let url = URL(string: "http://127.0.0.1:5051/stockname?code=\(code)") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/stockname?code=\(code)") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, _ in
             if let data = data {
@@ -233,7 +233,7 @@ class AppModel: ObservableObject {
         }.resume()
     }
     func updateTradingModeOnServer() {
-        guard let url = URL(string: "http://127.0.0.1:5051/settings") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/settings") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

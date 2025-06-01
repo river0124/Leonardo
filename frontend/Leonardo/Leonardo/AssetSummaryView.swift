@@ -77,7 +77,7 @@ struct AssetSummaryView: View {
     }
 
     func fetchSummary() {
-        guard let url = URL(string: "http://127.0.0.1:5051/total_asset/summary") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/total_asset/summary") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, _ in
             guard let data = data else { return }

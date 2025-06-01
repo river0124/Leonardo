@@ -112,7 +112,7 @@ struct HoldingView: View {
             fetchHoldings()
 
             // Check market status before setting up timer
-            guard let statusURL = URL(string: "http://127.0.0.1:5051/market/is_open") else { return }
+            guard let statusURL = URL(string: "http://127.0.0.1:5000/market/is_open") else { return }
             URLSession.shared.dataTask(with: statusURL) { data, _, _ in
                 guard let data = data else { return }
                 if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -132,7 +132,7 @@ struct HoldingView: View {
     }
 
     func fetchHoldings() {
-        guard let url = URL(string: "http://127.0.0.1:5051/holdings/detail") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/holdings/detail") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, _ in
             guard let data = data else { return }

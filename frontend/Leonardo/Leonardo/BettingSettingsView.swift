@@ -75,7 +75,7 @@ struct BettingSettingsView: View {
     }
 
     func saveSettings() {
-        guard let url = URL(string: "http://127.0.0.1:5051/settings") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/settings") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

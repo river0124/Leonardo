@@ -62,7 +62,7 @@ if __name__ == "__main__":
         api = HolidayAPI(SERVICE_KEY)
 
         now = datetime.now()
-        start_year = now.year - 2
+        start_year = now.year - 5
         end_year = now.year + 1
 
         all_holidays = []
@@ -88,8 +88,8 @@ if __name__ == "__main__":
         print(f"📄 CSV 파일 저장 완료: {output_file}")
 
         # ✅ 슬랙 알림 전송
-        post_to_slack(f"✅ 공휴일 정보 {len(all_holidays)}건 수집 완료 및 저장됨", config_path="/Users/hyungseoklee/Documents/Leonardo/backend/config.yaml")
+        post_to_slack(f"✅ 공휴일 정보 {len(all_holidays)}건 수집 완료 및 저장됨")
 
     except Exception as e:
-        post_to_slack(f"❌ 공휴일 수집 실패: {e}", config_path="/Users/hyungseoklee/Documents/Leonardo/backend/config.yaml")
+        post_to_slack(f"❌ 공휴일 수집 실패: {e}")
         raise

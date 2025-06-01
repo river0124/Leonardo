@@ -464,7 +464,7 @@ struct ChartsView: View {
             .alert("매수를 하시겠습니까?", isPresented: $showBuyConfirmation) {
                 Button("확인") {
                     guard let info = pendingBuyInfo else { return }
-                    let url = URL(string: "http://127.0.0.1:5051/buy")!
+                    let url = URL(string: "http://127.0.0.1:5000/buy")!
                     var request = URLRequest(url: url)
                     request.httpMethod = "POST"
                     request.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -536,7 +536,7 @@ struct ChartsView: View {
     }
     
     func fetchCandleData(for code: String) {
-        guard let url = URL(string: "http://127.0.0.1:5051/candle?code=\(code)") else {
+        guard let url = URL(string: "http://127.0.0.1:5000/candle?code=\(code)") else {
             print("❌ URL 생성 실패")
             return
         }
@@ -586,7 +586,7 @@ struct ChartsView: View {
     }
     
     func fetchPriceData(for code: String) {
-        guard let url = URL(string: "http://127.0.0.1:5051/price?stock_no=\(code)") else {
+        guard let url = URL(string: "http://127.0.0.1:5000/price?stock_no=\(code)") else {
             print("❌ 가격 데이터 URL 생성 실패")
             return
         }
@@ -622,7 +622,7 @@ struct ChartsView: View {
     
     private func fetchSummary() {
         print("🧪 fetchSummary() 진입")
-        guard let url = URL(string: "http://127.0.0.1:5051/total_asset/summary") else { return }
+        guard let url = URL(string: "http://127.0.0.1:5000/total_asset/summary") else { return }
 
         URLSession.shared.dataTask(with: url) { data, _, _ in
             guard let data = data else { return }
