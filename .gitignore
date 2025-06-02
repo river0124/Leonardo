@@ -6,6 +6,10 @@ __pycache__/
 *.py[cod]
 *.pyc
 
+# Virtual Environments
+.venv/
+**/.venv/
+
 # Logs and runtime
 *.log
 *.pid
@@ -14,6 +18,7 @@ __pycache__/
 *.swp
 *.tmp
 logs/
+cache/
 
 # IDE/editor
 .idea/
@@ -32,32 +37,33 @@ DerivedData/
 *.mode1v3
 *.mode2v3
 *.perspectivev3
+
+# Project-specific
 *example*
 websocket_example*.py
 websocket_utils.py
 config.yaml
+backend/token.json
 
-# Other project build files
-build/
-*.orig
-
-
-# Output caches
-cache/
-logs/
-
-# Project config
+# AI/ML artifacts
+*.h5
+*.pt
+*.pth
+*.ckpt
+*.tflite
+leonardo_ai/**/__pycache__/
+leonardo_ai/**/logs/
+leonardo_ai/**/cache/
 
 # Backup or temp files
 *~
 *.bak
 *.tmp
-backend/token.json
 
-# Secret keys
+# Secrets
 *.key
 *.pem
 
-# Environment files
+# Environment
 .env
 .bash_profile

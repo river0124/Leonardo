@@ -214,8 +214,6 @@ class KoreaInvestEnv:
 
         return data
 
-
-
 class KoreaInvestAPI:
     def __init__(self, cfg, base_headers, websocket_approval_key=None):
         logger.debug("💥 KoreaInvestAPI __init__ 진입")

@@ -9,6 +9,7 @@ import datetime
 import os
 import pandas as pd
 from cryptography.fernet import Fernet
+from settings import cfg
 
 from get_asset import get_total_asset
 from get_candle_data import get_candle_chart_data
@@ -16,7 +17,6 @@ from watchlist_store import load_watchlist, add_code_to_watchlist, remove_code_f
 from utils import KoreaInvestEnv, KoreaInvestAPI
 from stock_name_finder import get_stock_name_by_code
 from trade_manager import TradeManager
-from trade_listener import TradeListener
 from settings import load_settings, save_settings
 from loguru import logger
 
@@ -46,8 +46,8 @@ execution_queue = asyncio.Queue()
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
+
 # 디버깅 모드 설정
-cfg = load_settings()
 DEBUG = cfg.get("DEBUG", "False").lower() == "true"
 if DEBUG:
     logger.info("🐞 cfg 로딩 완료: {}", cfg)
@@ -99,18 +99,16 @@ def validate_order_request(data, require_atr=False):
         "atr": atr
     }
 
-# approval_key = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers()).websocket_approval_key
-# api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers(), websocket_approval_key=approval_key)
-# trade_manager = TradeManager(api, cfg, approval_key=approval_key)
-
 # --- 주식 리스트 로드 ---
 try:
     stock_df = pd.read_csv(STOCK_LIST_CSV, dtype=str)
 except FileNotFoundError:
-    logger.error(f"📛 주식 리스트 파일이 존재하지 않습니다: {STOCK_LIST_CSV}")
+    if DEBUG:
+        logger.error(f"📛 주식 리스트 파일이 존재하지 않습니다: {STOCK_LIST_CSV}")
     stock_df = pd.DataFrame(columns=['Code', 'Name'])
 except Exception as e:
-    logger.error(f"📛 주식 리스트 파일 로딩 실패: {e}")
+    if DEBUG:
+        logger.error(f"📛 주식 리스트 파일 로딩 실패: {e}")
     stock_df = pd.DataFrame(columns=['Code', 'Name'])
 
 @app.route('/candle', methods=['GET'])
@@ -141,7 +139,8 @@ def candle():
         result["candles"] = valid_candles
         return jsonify(result), 200
     except Exception as e:
-        logger.error(f"Error in /candle for code {code}: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /candle for code {code}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -155,7 +154,8 @@ def asset():
         # 클라이언트가 문자열을 기대한다면 str(total_asset)이 맞습니다.
         return jsonify({"balance": total_asset})
     except Exception as e:
-        logger.error(f"Error in /asset: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /asset: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -167,10 +167,12 @@ def high52():
             data = json.load(f)
         return jsonify(data), 200
     except FileNotFoundError:
-        logger.warning(f"/high52: high52.json not found.")
+        if DEBUG:
+            logger.warning(f"/high52: high52.json not found.")
         return jsonify({"error": "52주 신고가 데이터를 찾을 수 없습니다."}), 404
     except Exception as e:
-        logger.error(f"Error in /high52: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /high52: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -190,7 +192,8 @@ def get_price():
             stock_name = names_series.iloc[0] if not names_series.empty else "정보없음"
         else:
             stock_name = "정보없음 (목록 확인 필요)"
-            logger.warning("Stock dataframe is empty or missing columns for name lookup in /price.")
+            if DEBUG:
+                logger.warning("Stock dataframe is empty or missing columns for name lookup in /price.")
 
         filtered_data = {
             "name": stock_name,
@@ -210,7 +213,8 @@ def get_price():
             content_type='application/json; charset=utf-8'
         )
     except Exception as e:
-        logger.error(f"Error in /price for stock_no {stock_no}: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /price for stock_no {stock_no}: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -235,7 +239,8 @@ def watchlist():
             return jsonify({"message": f"{code} removed from watchlist."}), 200
 
     except Exception as e:
-        logger.error(f"Error in /watchlist: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /watchlist: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -269,13 +274,15 @@ def settings():
             cfg = load_settings()
             env = KoreaInvestEnv(cfg)
 
-            api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers(), websocket_approval_key=approval_key)
-            trade_manager = TradeManager(api, cfg, approval_key=approval_key)
+            api = KoreaInvestAPI(cfg=env.get_full_config(), base_headers=env.get_base_headers(), websocket_approval_key=cfg['approval_key'])
+            trade_manager = TradeManager(api, cfg, approval_key=cfg['approval_key'])
 
-            logger.debug(f"⚙️ Settings updated. Mode: {'모의투자' if cfg.get('is_paper_trading') else '실전투자'}")
+            if DEBUG:
+                logger.debug(f"⚙️ Settings updated. Mode: {'모의투자' if cfg.get('is_paper_trading') else '실전투자'}")
             return jsonify({"message": "Settings saved successfully"}), 200
         except Exception as e:
-            logger.error(f"Error saving settings: {e}", exc_info=True)
+            if DEBUG:
+                logger.error(f"Error saving settings: {e}", exc_info=True)
             return jsonify({"error": "Failed to save settings"}), 500
 
     elif request.method == "GET":
@@ -283,7 +290,8 @@ def settings():
             cfg = load_settings()
             return jsonify(cfg), 200
         except Exception as e:
-            logger.error(f"Error loading settings: {e}", exc_info=True)
+            if DEBUG:
+                logger.error(f"Error loading settings: {e}", exc_info=True)
             return jsonify({"error": "Failed to load settings"}), 500
 
 
@@ -320,7 +328,8 @@ def holdings_detail():
             "is_empty": len(stocks_list) == 0
         }), 200
     except Exception as e:
-        logger.error(f"Error in /holdings/detail: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /holdings/detail: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -343,7 +352,8 @@ def get_holdings():
 
         return jsonify(stocks_list), 200
     except Exception as e:
-        logger.error(f"Error in /holdings: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /holdings: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -351,11 +361,13 @@ def get_holdings():
 def get_stock_list():
     try:
         if stock_df.empty:
-            logger.warning("/stock/list: Global stock_df is empty.")
+            if DEBUG:
+                logger.warning("/stock/list: Global stock_df is empty.")
             return jsonify({"error": "주식 목록 데이터를 사용할 수 없습니다."}), 503  # Service Unavailable
 
         if not {'Code', 'Name'}.issubset(stock_df.columns):
-            logger.error("/stock/list: Global stock_df is missing 'Code' or 'Name' columns.")
+            if DEBUG:
+                logger.error("/stock/list: Global stock_df is missing 'Code' or 'Name' columns.")
             return jsonify({"error": "주식 목록 데이터 형식이 올바르지 않습니다."}), 500
 
         # 전역 stock_df 사용
@@ -368,7 +380,8 @@ def get_stock_list():
             content_type='application/json; charset=utf-8'
         )
     except Exception as e:
-        logger.error(f"Error in /stock/list: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /stock/list: {str(e)}", exc_info=True)
         return jsonify({"error": "주식 목록을 가져오는 중 오류 발생"}), 500
 
 
@@ -402,7 +415,8 @@ def total_asset_summary():
             content_type='application/json; charset=utf-8'
         )
     except Exception as e:
-        logger.error(f"Error in /total_asset/summary: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /total_asset/summary: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -437,7 +451,8 @@ def is_market_open():
         return jsonify({"market_open": True}), 200
 
     except Exception as e:
-        logger.error(f"Error in /market/is_open: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Error in /market/is_open: {str(e)}", exc_info=True)
         return jsonify({"market_open": False, "error": str(e)}), 500
 
 
@@ -449,7 +464,10 @@ def buy_stock():
             return jsonify({"success": False, "message": result}), 400
 
         order = result
-        logger.debug(f"[BUY API] 주문 요청 데이터: {json.dumps(order, ensure_ascii=False)}")
+        if DEBUG:
+            logger.debug(f"[BUY API] 주문 요청 데이터: {json.dumps(order, ensure_ascii=False)}")
+
+
         asyncio.run_coroutine_threadsafe(
             execution_queue.put({
                 "type": "buy",
@@ -462,49 +480,35 @@ def buy_stock():
             loop
         )
 
-        logger.info(f"📥 매수 주문 큐에 등록됨: {order['stock_code']} | 수량: {order['quantity']} | 가격: {order['price']} | ATR: {order['atr']}")
+        if DEBUG:
+            logger.info(f"📥 매수 주문 큐에 등록됨: {order['stock_code']} | 수량: {order['quantity']} | 가격: {order['price']} | ATR: {order['atr']}")
 
         return jsonify({
             "success": True,
             "message": "매수 요청이 큐에 등록되었습니다. 체결 대기 중입니다."
         }), 202
     except Exception as e:
-        logger.error(f"Unhandled exception in /buy: {str(e)}", exc_info=True)
+        if DEBUG:
+            logger.error(f"Unhandled exception in /buy: {str(e)}", exc_info=True)
         return jsonify({"success": False, "message": f"서버 처리 중 예외 발생: {str(e)}"}), 500
 
 
 # --- 앱 실행 ---
 if __name__ == '__main__':
-    from websocket_manager import Websocket_Manager, websocket_manager
-
-    # ✅ KoreaInvestEnv 객체를 먼저 명시적으로 생성
     env = KoreaInvestEnv(cfg)
-
-    # ✅ API 객체 생성 (승인키를 명시적으로 넘김)
     api = KoreaInvestAPI(
         cfg=cfg,
         base_headers=env.get_base_headers(),
         websocket_approval_key=cfg['websocket_approval_key']
     )
 
-    # Websocket_Manager 인스턴스 생성
-    global websocket_manager
-    websocket_manager = Websocket_Manager(cfg, cfg['websocket_approval_key'])
+    execution_queue = asyncio.Queue()
 
-    trade_manager = TradeManager(
-        api=api,
-        cfg=cfg,
-        approval_key=cfg['websocket_approval_key'],
-        execution_queue=execution_queue,
-        websocket_manager=websocket_manager
-    )
-    trade_listener = TradeListener(cfg, trade_manager=trade_manager, api=api)
-    #
-    # # 비동기 작업 등록
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    trade_manager = TradeManager(cfg, api, execution_queue)
     loop.create_task(trade_manager.process_execution_queue())
 
-    # asyncio 이벤트 루프를 백그라운드 스레드에서 실행
     threading.Thread(target=loop.run_forever, daemon=True).start()
-
-    # Flask 서버 실행 (메인 스레드에서 실행, 자동 재시작 비활성화)
     app.run(debug=True, use_reloader=False)

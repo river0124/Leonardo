@@ -1,65 +1,27 @@
-# trade_manager.py
-
+import asyncio
 from loguru import logger
 import os
 from settings import cfg
-import json
 from slack_notifier import post_to_slack
 import time
-from datetime import datetime, time as dt_time, timedelta
-from websocket_manager import Websocket_Manager, websocket_manager
+from websocket_manager import Websocket_Manager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
-STOPLOSS_FILE_NAME = "stoploss.json"
 
 ORDER_TYPE_LIMIT = "00"  # 지정가
 ORDER_TYPE_MARKET = "01"  # 시장가
 
-ATR_MULTIPLIER_STOPLOSS = 2
-ATR_MULTIPLIER_TRAIL = 2
-
-MARKET_OPEN_TIME = dt_time(8, 40)  # 장 시작 시간 (예: 정규장 시작 20분 전부터 감시 시작)
-MARKET_CLOSE_TIME = dt_time(15, 31)  # 장 마감 시간 (예: 정규장 마감 1분 후까지 감시)
-
 DEBUG = cfg.get("DEBUG", "False").lower() == "true"
 
 class TradeManager:
-    def __init__(self, api, cfg, approval_key, execution_queue, websocket_manager):
-        self.api = api
+    def __init__(self, cfg, api, execution_queue=None):
         self.cfg = cfg
-        self.approval_key = approval_key
-        # 주문 감시 큐 (체결 대기 주문)
-        self.watch_orders = []
-        # 주문 처리 큐 초기화
+        self.api = api
         self.order_queue = execution_queue
-        self.websocket_manager = websocket_manager
-
-    def _read_json_file(self, file_path, default_data=None):
-        """Helper function to read a JSON file."""
-        if not os.path.exists(file_path):
-            logger.debug(f"JSON 파일 없음: {file_path}. 기본 데이터 반환.")
-            return default_data if default_data is not None else {}
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            logger.warning(f"⚠️ JSON decode error in {file_path}. Returning default data.")
-            return default_data if default_data is not None else {}
-        except IOError as e:
-            logger.error(f"⚠️ IOError reading {file_path}: {e}")
-            return default_data if default_data is not None else {}
-
-    def _write_json_file(self, file_path, data):
-        """Helper function to write data to a JSON file."""
-        try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            return True
-        except IOError as e:
-            logger.error(f"⚠️ IOError writing to {file_path}: {e}")
-            return False
+        self.websocket_manager = Websocket_Manager(cfg, api)
+        self.watch_orders = []
 
     async def place_order_with_stoploss(self, stock_code, qty, price, atr, order_type, timeout=5):
         order_type_normalized = str(order_type).strip()
@@ -71,39 +33,41 @@ class TradeManager:
             ord_dvsn = ORDER_TYPE_LIMIT
             ord_unpr = "00"
 
-        logger.debug(f"💬 주문 딕셔너리: stock_code={stock_code}, qty={qty}, price={price}, atr={atr}, order_type={order_type}")
-
-        # 체결 통보 등록: 주문 전에 호출해서 실시간 통보 등록
-        try:
-            await self.websocket_manager.register_execution_notice(self.api, self.websocket_manager.websockets_url)
-            logger.info("✔ 체결 통보 등록 완료")
-        except Exception as e:
-            logger.error(f"❌ 체결 통보 등록 중 예외 발생: {e}")
+        if DEBUG:
+            logger.debug(f"💬 주문 딕셔너리: stock_code={stock_code}, qty={qty}, price={price}, atr={atr}, order_type={order_type}")
 
         if qty is None:
-            logger.warning(f"⚠️ 수량(qty)이 None입니다! stock_code: {stock_code}, 요청 정보 확인 필요.")
+            if DEBUG:
+                logger.warning(f"⚠️ 수량(qty)이 None입니다! stock_code: {stock_code}")
 
-        logger.info(f"📤 [{stock_code}] {qty}주 주문 실행 (유형: {order_type}, 가격: {price}, ATR: {atr})")
+        if DEBUG:
+            logger.info(f"📤 [{stock_code}] {qty}주 주문 실행 (유형: {order_type}, 가격: {price}, ATR: {atr})")
 
-        try:
-            # websocket_manager의 run_websocket()은 별도로 백그라운드 task로 관리하는게 좋음.
-            # 따라서 여기서는 run_websocket() 호출 제거하고 메시지 전송만 처리하도록 개선 권장.
-            pass
-        except Exception as e:
-            logger.error(f"❌ websocket_manager.run_websocket() 호출 중 예외 발생: {e}")
+        # WebSocket 실시간 수신 루프 시작 (체결통보 등록 포함)
+        asyncio.create_task(self.websocket_manager.run_forever(auto_register_notice=True))
 
         try:
+            await self.websocket_manager.register_execution_notice()
+            if DEBUG:
+                logger.info(f"📡 [{stock_code}] 체결통보 웹소켓 등록 완료")
             response = self.api.do_buy(stock_code, qty, ord_unpr, ord_dvsn)
         except Exception as e:
-            logger.error(f"❌ [{stock_code}] 주문 요청 중 예외 발생: {e}")
+            if DEBUG:
+                logger.error(f"❌ [{stock_code}] 주문 요청 중 예외 발생: {e}")
             post_to_slack(f"❌ 주문 요청 실패: {stock_code} → {e}")
             return {"error": f"주문 요청 실패: {e}", "success": False}
 
         if response and hasattr(response, "_resp") and hasattr(response._resp, "text"):
             try:
-                logger.debug(f"[DEBUG] 주문 응답 원문: {response._resp.text}")
+                if DEBUG:
+                    logger.debug(f"[DEBUG] 주문 응답 원문: {response._resp.text}")
             except Exception as e:
-                logger.warning(f"[DEBUG] 주문 응답 원문 로깅 실패: {e}")
+                if DEBUG:
+                    logger.warning(f"[DEBUG] 주문 응답 원문 로깅 실패: {e}")
+
+        if response and response.is_ok():
+            if DEBUG:
+                logger.info(f"📦 [{stock_code}] 주문 API 응답 정상 수신")
 
         if not response or not response.is_ok():
             error_msg = response.get_error_message() if response else 'API 응답 없음'
@@ -115,9 +79,11 @@ class TradeManager:
                         msg1 = json.loads(resp_text).get("msg1", "")
                         error_msg = msg1 if msg1 else "알 수 없는 오류 발생"
                 except Exception as e:
-                    logger.warning(f"응답 메시지 파싱 실패: {e}")
+                    if DEBUG:
+                        logger.warning(f"응답 메시지 파싱 실패: {e}")
                     error_msg = "알 수 없는 오류 발생"
-            logger.error(f"❌ [{stock_code}] 주문 실패: {error_msg}")
+            if DEBUG:
+                logger.error(f"❌ [{stock_code}] 주문 실패: {error_msg}")
             post_to_slack(f"❌ 주문 실패: {stock_code} → {error_msg}")
             return {"error": f"주문 실패: {error_msg}", "success": False}
 
@@ -126,7 +92,8 @@ class TradeManager:
         order_id = order_output.get("ODNO")
 
         if not order_id:
-            logger.error(f"❌ [{stock_code}] 주문 응답 본문 오류 또는 주문번호(ODNO) 없음: {order_output}")
+            if DEBUG:
+                logger.error(f"❌ [{stock_code}] 주문 응답 본문 오류 또는 주문번호(ODNO) 없음: {order_output}")
             post_to_slack(f"❌ 주문 응답 본문 오류: {stock_code}")
             return {"error": "주문 응답 본문 오류", "success": False}
 
@@ -137,10 +104,14 @@ class TradeManager:
             "atr": atr,
             "price": price,
             "order_time": time.time(),
-            "timeout": timeout
+            "timeout": timeout,
+            "filled_qty": 0,
         })
+        if DEBUG:
+            logger.debug(f"📊 현재 감시 중인 주문 수: {len(self.watch_orders)}")
 
-        logger.info(f"✅ [{stock_code}] 주문 성공 및 감시 등록 완료. 주문번호: {order_id}")
+        if DEBUG:
+            logger.info(f"✅ [{stock_code}] 주문 성공 및 감시 등록 완료. 주문번호: {order_id}")
 
         return {
             "order_id": order_id,
@@ -157,36 +128,64 @@ class TradeManager:
 
         for order in self.watch_orders:
             if order["order_id"] == order_no and order["stock_code"] == stock_code:
-                # 누적 체결 수량 업데이트
-                order.setdefault("filled_qty", 0)
                 order["filled_qty"] += qty_filled
 
-                logger.info(f"📥 {stock_code} {qty_filled}주 체결되었습니다.")
+                if DEBUG:
+                    logger.info(f"📥 {stock_code} {qty_filled}주 체결되었습니다.")
                 post_to_slack(f"📥 {stock_code} {qty_filled}주 체결되었습니다.")
 
-                # 전체 주문 수량과 같아지면 완료
                 if order["filled_qty"] >= order["qty"]:
-                    logger.info(f"✅ {stock_code} 전체 {order['qty']}주 매수가 완료되었습니다.")
+                    if DEBUG:
+                        logger.info(f"✅ {stock_code} 전체 {order['qty']}주 매수가 완료되었습니다.")
                     post_to_slack(f"✅ {stock_code} 전체 {order['qty']}주 매수가 완료되었습니다.")
+                    await self.websocket_manager.unregister_execution_notice(stock_code)
                     self.watch_orders.remove(order)
-                    if websocket_manager:
-                        cmd = 8 if self.cfg.get("is_paper_trading", True) else 6
-                        send_data = self.api.get_send_data(cmd=cmd)
-                        send_data["approval_key"] = self.approval_key
-                        await websocket_manager.send(send_data)
-                        logger.info(f"📴 [{stock_code}] 체결통보 해제 요청 보냄")
-
                 break
+        else:
+            if DEBUG:
+                logger.warning(f"📛 체결 메시지 무시됨. 일치하는 주문 없음: order_no={order_no}, stock_code={stock_code}")
 
     async def process_execution_queue(self):
         while True:
+            if DEBUG:
+                logger.debug("🔁 [TradeManager] 실행 큐 루프 진입")
             try:
                 task = await self.order_queue.get()
+
+                if task is None:
+                    if DEBUG:
+                        logger.warning("큐에서 None 작업 수신, 무시함")
+                    continue
+
+                if not isinstance(task, dict):
+                    if DEBUG:
+                        logger.warning(f"큐에서 dict가 아닌 항목 수신: {task}, 무시함")
+                    continue
+
                 stock_code = task.get("stock_code")
                 qty = task.get("qty")
                 price = task.get("price")
                 atr = task.get("atr")
                 order_type = task.get("order_type", "시장가")
+
+                if DEBUG:
+                    logger.debug(f"큐 작업 처리 시작: {task}")
+
                 await self.place_order_with_stoploss(stock_code, qty, price, atr, order_type)
+
             except Exception as e:
-                logger.error(f"❌ 큐 처리 중 오류 발생: {e}")
+                if DEBUG:
+                    logger.error(f"❌ 큐 처리 중 오류 발생: {e}", exc_info=True)
+
+
+    async def handle_ws_message(self, message: dict):
+        """
+        WebsocketManager가 실시간 체결 메시지를 전달할 때 호출됨.
+        체결 메시지를 내부 handle_execution()으로 위임 처리.
+        """
+        try:
+            if message.get("body") and "ODER_NO" in message["body"]:
+                await self.handle_execution(message)
+        except Exception as e:
+            if DEBUG:
+                logger.error(f"❌ 실시간 체결 메시지 처리 중 오류 발생: {e}")

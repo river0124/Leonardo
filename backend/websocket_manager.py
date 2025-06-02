@@ -1,16 +1,13 @@
 import asyncio
 from loguru import logger
 import os
-import datetime
 from settings import cfg
 import websockets
 import json
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from base64 import b64decode
-
-from utils import KoreaInvestEnv, KoreaInvestAPI
-from trade_listener import TradeListener
+import traceback
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
@@ -18,81 +15,15 @@ SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
 
 DEBUG = cfg.get("DEBUG", "False").lower() == "true"
 
-websocket_manager = None
-
-class SimpleListener:
-    async def handle_ws_message(self, message):
-        print(f"🔔 체결 통보 수신: {message}")
-
 class Websocket_Manager:
-    def __init__(self, cfg, approval_key):
-        env_cls = KoreaInvestEnv(cfg)
-        base_headers = env_cls.get_base_headers()
-        cfg = env_cls.get_full_config()
-        self.websocket_approval_key = approval_key
-        self.korea_invest_api = KoreaInvestAPI(cfg, base_headers=base_headers, websocket_approval_key=approval_key)
+    def __init__(self, cfg, api, execution_queue=None):
+        self.cfg = cfg
+        self.api = api
+        self.order_queue = execution_queue
         self.websockets_url = cfg['paper_websocket_url'] if cfg['is_paper_trading'] else cfg['websocket_url']
         self.is_paper = cfg["is_paper_trading"]
-        self.should_run = True
-        self.connection = None  # WebSocket connection attribute
-
-    def set_listener(self, listener):
-        self.listener = listener
-
-    def stop(self):
-        self.should_run = False
-
-    async def run_websocket(self):
-        self.should_run = True
-        running_account_num = self.korea_invest_api.account_num
-        aes_key, aes_iv = None, None
-        logger.info("한국투자증권 API웹소켓 연결 시도!")
-        async with websockets.connect(self.websockets_url, ping_interval=None) as websocket:
-            cmd_register = 7 if self.is_paper else 5
-            send_data_register_str = self.korea_invest_api.get_send_data(cmd=cmd_register)
-            send_data_register = json.loads(send_data_register_str)
-            send_data_register["approval_key"] = self.websocket_approval_key
-            send_data_register = json.dumps(send_data_register)
-            logger.info(f"📨 체결통보 등록 요청 전송: {send_data_register}, [{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
-            await websocket.send(send_data_register)
-            logger.debug(f"📡 Websocket에 체결통보 등록 요청 데이터 전송 완료, [{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
-
-            while self.should_run:
-                data = await websocket.recv()
-                if data[0] == '0':
-                    continue
-                elif data[0] == '1':
-                    recvstr = data.split('|')
-                    trid0 = recvstr[1]
-                    if trid0 in ("H0STCNI0", "H0STCNI9"):
-                        self.receive_signing_notice(recvstr[3], aes_key, aes_iv, running_account_num)
-                else:
-                    jsonObject = json.loads(data)
-                    trid = jsonObject["header"]["tr_id"]
-                    if trid != "PINGPONG":
-                        rt_cd = jsonObject["body"]["rt_cd"]
-                        if rt_cd == '1':
-                            logger.info(f"### ERROR RETURN CODE [{rt_cd} MSG [{jsonObject['body']['msg1']}], [{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
-                        elif rt_cd == '0':
-                            logger.info(f"### RETURN CODE [{rt_cd} MSG [{jsonObject['body']['msg1']}], [{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
-                            if trid in ("H0STCNI0", "H0STCNI9"):
-                                aes_key = jsonObject["body"]["output"]["key"]
-                                aes_iv = jsonObject["body"]["output"]["iv"]
-                                logger.info(f"### TRID [{trid}] KEY[{aes_key}] IV[{aes_iv}], [{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
-                    else:
-                        logger.info(f"### RECV [PINGPONG] [{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
-                        await websocket.send(data)
-                        logger.info(f"### SEND [PINGPONG] [{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
-
-            # Unregister when done
-            cmd_unregister = 8 if self.is_paper else 6
-            send_data_unregister_str = self.korea_invest_api.get_send_data(cmd=cmd_unregister)
-            send_data_unregister = json.loads(send_data_unregister_str)
-            send_data_unregister["approval_key"] = self.websocket_approval_key
-            send_data_unregister = json.dumps(send_data_unregister)
-            logger.info(f"📨 체결통보 해제 요청 전송: {send_data_unregister}")
-            await websocket.send(send_data_unregister)
-            logger.info("✔ 체결통보 해제 요청 전송 완료.")
+        self.listener = None
+        self._running = False
 
     def aes_cbc_base64_dec(self, key, iv, cipher_text):
         """
@@ -108,17 +39,20 @@ class Websocket_Manager:
         """
         "고객 ID|계좌번호|주문번호|원주문번호|매도매수구분|정정구분|주문종류2|단축종목코드|체결수량|체결단가|체결시간|거부여부|체결여부|접수여부|지점번호|주문수량|계좌명|체결종목명|해외종목구분|담보유형코드|담보대출일자|분할매수매도시작시간|분할매수매도종료시간|시간분할타입유형"
         """
-        logger.debug(f"🛰 체결통보 수신 데이터 시작: {data}")
+        if DEBUG:
+            logger.debug(f"🛰 체결통보 수신 데이터 시작: {data}")
         # AES256 처리 단계
         aed_dec_str = Websocket_Manager.aes_cbc_base64_dec(key, iv, data)
-        logger.debug(f"📦 AES 해독 데이터: {aed_dec_str}")
+        if DEBUG:
+            logger.debug(f"📦 AES 해독 데이터: {aed_dec_str}")
         values = aed_dec_str.split('^')
         계좌번호 = values[1] #
         if 계좌번호[:8] != account_num:
             return
         거부여부 = values[12]
         if 거부여부 != "0":
-            logger.info(f"Got 거부 TR!")
+            if DEBUG:
+                logger.info(f"Got 거부 TR!")
             return
         체결여부 = values[13]
         if 체결여부 == "01":
@@ -153,14 +87,16 @@ class Websocket_Manager:
 
         주문번호 = values[2]
         원주문번호 = values[3]
-        logger.info(f"Received chejandata! 시간: {시간}, "
-                    f"종목코드 : {종목코드}, 종목명: {종목명}, 주문수량: {주문수량}, "
-                    f"주문가격 : {주문가격}, 체결수량: {체결수량}, 체결가격: {체결가격}, "
-                    f"주문구분 : {주문구분}, 주문번호: {주문번호}, "
-                    f"원주문번호 : {원주문번호}, 체결여부: {체결여부}")
+        if DEBUG:
+            logger.info(f"Received chejandata! 시간: {시간}, "
+                        f"종목코드 : {종목코드}, 종목명: {종목명}, 주문수량: {주문수량}, "
+                        f"주문가격 : {주문가격}, 체결수량: {체결수량}, 체결가격: {체결가격}, "
+                        f"주문구분 : {주문구분}, 주문번호: {주문번호}, "
+                        f"원주문번호 : {원주문번호}, 체결여부: {체결여부}")
 
-        logger.debug(f"📬 체결 데이터 파싱 완료. Listener 존재 여부: {hasattr(self, 'listener')} | Listener 값: {self.listener}")
-        logger.debug(f"📨 TradeManager → WebsocketManager 수신 확인: 체결데이터 전달 준비 중.")
+        if DEBUG:
+            logger.debug(f"📬 체결 데이터 파싱 완료. Listener 존재 여부: {hasattr(self, 'listener')} | Listener 값: {self.listener}")
+            logger.debug(f"📨 TradeManager → WebsocketManager 수신 확인: 체결데이터 전달 준비 중.")
         if hasattr(self, "listener") and self.listener:
             try:
                 asyncio.create_task(self.listener.handle_ws_message({
@@ -175,7 +111,8 @@ class Websocket_Manager:
                     "체결여부": 체결여부,
                 }))
             except Exception as e:
-                logger.error(f"❌ 리스너에 체결정보 전달 중 오류: {e}")
+                if DEBUG:
+                    logger.error(f"❌ 리스너에 체결정보 전달 중 오류: {e}")
 
     def receive_realtime_hoga_domestic(self, data):
         """
@@ -213,50 +150,89 @@ class Websocket_Manager:
             현재가 = 현재가,
         )
 
-    async def register_execution_notice(self, korea_invest_api, url):
-        running_account_num = korea_invest_api.account_num
+    async def register_execution_notice(self):
+        if self._running:
+            if DEBUG:
+                logger.warning("register_execution_notice 이미 실행 중입니다.")
+            return
+        self._running = True
+
+        running_account_num = self.api.account_num
         aes_key, aes_iv = None, None
-        logger.info("한국투자증권 API웹소켓 연결 시도!")
-        async with websockets.connect(url, ping_interval=None) as websocket:
-            cmd = 7 if self.is_paper else 5
-            send_data = korea_invest_api.get_send_data(cmd=cmd)
-            await websocket.send(send_data)
-            # TODO: Consider adding timeout or disconnect logic to avoid infinite loop issues
-            while True:
-                data = await websocket.recv()
-                if data[0] == '0':
-                    pass
-                elif data[0] == '1':
-                    recvstr = data.split('|') # 수신데이터가 실데이터 이전은 '|'로 나뉘어져 있어 split
-                    trid0 = recvstr[1]
-                    if trid0 in ("H0STCNI0", "H0STCNI9"): #주식 체결 통보 처리
-                        self.receive_signing_notice(recvstr[3], aes_key, aes_iv, running_account_num)
 
-                else:
-                    jsonObject = json.loads(data)
-                    trid = jsonObject["header"]["tr_id"]
+        if DEBUG:
+            logger.info("한국투자증권 API 웹소켓 연결 시도!")
+        try:
+            async with websockets.connect(self.websockets_url, ping_interval=None) as websocket:
+                cmd = 7 if self.is_paper else 5
+                send_data = self.api.get_send_data(cmd=cmd)
+                await websocket.send(send_data)
+                if DEBUG:
+                    logger.info("체결통보 등록 요청 전송 완료")
 
-                    if trid != "PINGPONG":
-                        rt_cd = jsonObject["body"]["rt_cd"]
-                        if rt_cd == '1': #에러일 경우 처리
-                            logger.info(f"### ERROR RETURN CODE [{rt_cd} MSG [{jsonObject['body']['msg1']}]")
-                        elif rt_cd == '0': #정상일 경우 처리
-                            logger.info(f"### RETURN CODE [{rt_cd} MSG [{jsonObject['body']['msg1']}]")
-                            # 체결통보 처리를 위한 AES256 KEY, IV 처리 단계
-                            if trid in ("H0STCNI0", "H0STCNI9"):
-                                aes_key = jsonObject["body"]["output"]["key"]
-                                aes_iv = jsonObject["body"]["output"]["iv"]
-                                logger.info(f"### TRID [{trid}] KEY[{aes_key}] IV[{aes_iv}]")
+                while self._running:
+                    try:
+                        data = await websocket.recv()
+                    except websockets.exceptions.ConnectionClosed as e:
+                        if DEBUG:
+                            logger.error(f"🔌 웹소켓 연결 종료됨: {e}")
+                            logger.error(traceback.format_exc())
+                        break
 
-                    elif trid == "PINGPONG":
-                        logger.info(f"### RECV [PINGPONG] [{data}]")
-                        await websocket.send(data)
-                        logger.info(f"### SEND [PINGPONG] [{data}]")
+                    if not data:
+                        continue
+
+                    if data[0] == '0':
+                        continue
+                    elif data[0] == '1':
+                        recvstr = data.split('|')
+                        trid0 = recvstr[1]
+                        if trid0 in ("H0STCNI0", "H0STCNI9"):
+                            if not aes_key or not aes_iv:
+                                if DEBUG:
+                                    logger.warning("⚠️ AES KEY/IV 없음 → 체결 통보 무시")
+                                continue
+                            self.receive_signing_notice(recvstr[3], aes_key, aes_iv, running_account_num)
+                    else:
+                        jsonObject = json.loads(data)
+                        trid = jsonObject["header"]["tr_id"]
+
+                        if trid != "PINGPONG":
+                            rt_cd = jsonObject["body"]["rt_cd"]
+                            if rt_cd == '1':
+                                if DEBUG:
+                                    logger.info(f"### ERROR RETURN CODE [{rt_cd}] MSG [{jsonObject['body']['msg1']}]")
+                            elif rt_cd == '0':
+                                if DEBUG:
+                                    logger.info(f"### RETURN CODE [{rt_cd}] MSG [{jsonObject['body']['msg1']}]")
+                                if trid in ("H0STCNI0", "H0STCNI9"):
+                                    aes_key = jsonObject["body"]["output"]["key"]
+                                    aes_iv = jsonObject["body"]["output"]["iv"]
+                                    if DEBUG:
+                                        logger.info(f"### TRID [{trid}] KEY[{aes_key}] IV[{aes_iv}]")
+                        else:
+                            if DEBUG:
+                                logger.info(f"### RECV [PINGPONG]")
+                            await websocket.send(data)
+                            if DEBUG:
+                                logger.info(f"### SEND [PINGPONG]")
+
+        except Exception as e:
+            if DEBUG:
+                logger.error(f"register_execution_notice 중 오류 발생: {e}")
+        finally:
+            self._running = False
+            if DEBUG:
+                logger.info("register_execution_notice 종료됨")
+
+    def stop(self):
+        self._running = False
 
     async def unregister_execution_notice(self,korea_invest_api, url):
         running_account_num = korea_invest_api.account_num
         aes_key, aes_iv = None, None
-        logger.info("한국투자증권 API웹소켓 연결 시도!")
+        if DEBUG:
+            logger.info("한국투자증권 API웹소켓 연결 시도!")
         async with websockets.connect(url, ping_interval=None) as websocket:
             cmd = 8 if self.is_paper else 6
             send_data = korea_invest_api.get_send_data(cmd=cmd)
@@ -279,35 +255,34 @@ class Websocket_Manager:
                     if trid != "PINGPONG":
                         rt_cd = jsonObject["body"]["rt_cd"]
                         if rt_cd == '1':  # 에러일 경우 처리
-                            logger.info(f"### ERROR RETURN CODE [{rt_cd} MSG [{jsonObject['body']['msg1']}]")
+                            if DEBUG:
+                                logger.info(f"### ERROR RETURN CODE [{rt_cd} MSG [{jsonObject['body']['msg1']}]")
                         elif rt_cd == '0':  # 정상일 경우 처리
-                            logger.info(f"### RETURN CODE [{rt_cd} MSG [{jsonObject['body']['msg1']}]")
+                            if DEBUG:
+                                logger.info(f"### RETURN CODE [{rt_cd} MSG [{jsonObject['body']['msg1']}]")
                             # 체결통보 처리를 위한 AES256 KEY, IV 처리 단계
                             if trid in ("H0STCNI0", "H0STCNI9"):
                                 aes_key = jsonObject["body"]["output"]["key"]
                                 aes_iv = jsonObject["body"]["output"]["iv"]
-                                logger.info(f"### TRID [{trid}] KEY[{aes_key}] IV[{aes_iv}]")
+                                if DEBUG:
+                                    logger.info(f"### TRID [{trid}] KEY[{aes_key}] IV[{aes_iv}]")
 
                     elif trid == "PINGPONG":
-                        logger.info(f"### RECV [PINGPONG] [{data}]")
+                        if DEBUG:
+                            logger.info(f"### RECV [PINGPONG] [{data}]")
                         await websocket.send(data)
-                        logger.info(f"### SEND [PINGPONG] [{data}]")
+                        if DEBUG:
+                            logger.info(f"### SEND [PINGPONG] [{data}]")
 
-    async def listen_forever(self, ws_url):
-        async with websockets.connect(ws_url) as websocket:
-            while True:
-                msg = await websocket.recv()
-                message = json.loads(msg)
-                await TradeListener.handle_ws_message(message)
-
-    async def send(self, message: dict):
-        import json
-        logger.debug(f"📡 [Websocket_Manager] send() 호출됨 - 메시지: {message}")
-        if self.connection:
-            await self.connection.send(json.dumps(message))
-            logger.debug("✅ [Websocket_Manager] 메시지 전송 완료")
-        else:
-            logger.warning("⚠️ [Websocket_Manager] connection이 없습니다. 메시지 전송 실패")
+    #
+    # async def send(self, message: dict):
+    #     import json
+    #     logger.debug(f"📡 [Websocket_Manager] send() 호출됨 - 메시지: {message}")
+    #     if self.connection:
+    #         await self.connection.send(json.dumps(message))
+    #         logger.debug("✅ [Websocket_Manager] 메시지 전송 완료")
+    #     else:
+    #         logger.warning("⚠️ [Websocket_Manager] connection이 없습니다. 메시지 전송 실패")
 
 
 # async def register_stock_monitoring(korea_invest_api, stock_code: str):
@@ -326,7 +301,80 @@ class Websocket_Manager:
 #     await websocket.send(send_data_ask)
 #     await websocket.send(send_data_tick)
 
+    async def run_forever(self, auto_register_notice=True):
+        self._running = True
+        running_account_num = self.api.account_num
+        aes_key, aes_iv = None, None
 
-def init_websocket_manager(cfg, websocket_approval_key):
-    global websocket_manager
-    websocket_manager = Websocket_Manager(cfg, websocket_approval_key)
+        if DEBUG:
+            logger.info("한국투자증권 API 웹소켓 run_forever() 시작")
+        try:
+            async with websockets.connect(self.websockets_url, ping_interval=None) as websocket:
+                self.websocket = websocket
+
+                if auto_register_notice:
+                    cmd = 7 if self.is_paper else 5
+                    send_data = self.api.get_send_data(cmd=cmd)
+                    await websocket.send(send_data)
+                    if DEBUG:
+                        logger.info("체결통보 등록 요청 전송 완료")
+
+                while self._running:
+                    if DEBUG:
+                        logger.debug("🔁 [WebSocketManager] run_forever 루프 진입 - 메시지 수신 대기 중")
+                    try:
+                        data = await websocket.recv()
+                    except websockets.exceptions.ConnectionClosed as e:
+                        if DEBUG:
+                            logger.error(f"🔌 웹소켓 연결 종료됨: {e}")
+                        break
+
+                    if not data:
+                        continue
+
+                    await self._handle_incoming(data, aes_key, aes_iv, running_account_num)
+        except Exception as e:
+            if DEBUG:
+                logger.error(f"run_forever 중 오류 발생: {e}")
+        finally:
+            self._running = False
+            if DEBUG:
+                logger.info("run_forever 종료됨")
+
+    async def _handle_incoming(self, data, aes_key, aes_iv, running_account_num):
+        if DEBUG:
+            logger.debug(f"📨 [WebSocketManager] 수신 메시지: {data}")
+        if data[0] == '0':
+            return
+        elif data[0] == '1':
+            recvstr = data.split('|')
+            trid0 = recvstr[1]
+            if trid0 in ("H0STCNI0", "H0STCNI9"):
+                if not aes_key or not aes_iv:
+                    if DEBUG:
+                        logger.warning("⚠️ AES KEY/IV 없음 → 체결 통보 무시")
+                    return
+                self.receive_signing_notice(recvstr[3], aes_key, aes_iv, running_account_num)
+        else:
+            jsonObject = json.loads(data)
+            trid = jsonObject["header"]["tr_id"]
+
+            if trid != "PINGPONG":
+                rt_cd = jsonObject["body"]["rt_cd"]
+                if rt_cd == '1':
+                    if DEBUG:
+                        logger.info(f"### ERROR RETURN CODE [{rt_cd}] MSG [{jsonObject['body']['msg1']}]")
+                elif rt_cd == '0':
+                    if DEBUG:
+                        logger.info(f"### RETURN CODE [{rt_cd}] MSG [{jsonObject['body']['msg1']}]")
+                    if trid in ("H0STCNI0", "H0STCNI9"):
+                        aes_key = jsonObject["body"]["output"]["key"]
+                        aes_iv = jsonObject["body"]["output"]["iv"]
+                        if DEBUG:
+                            logger.info(f"### TRID [{trid}] KEY[{aes_key}] IV[{aes_iv}]")
+            else:
+                if DEBUG:
+                    logger.info(f"### RECV [PINGPONG]")
+                await self.websocket.send(data)
+                if DEBUG:
+                    logger.info(f"### SEND [PINGPONG]")
