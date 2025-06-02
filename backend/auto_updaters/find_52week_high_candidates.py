@@ -1,3 +1,4 @@
+CACHE_DIR = "/Users/hyungseoklee/Documents/Leonardo/backend/cache"
 from loguru import logger
 import json
 import FinanceDataReader as fdr
@@ -18,13 +19,16 @@ MIN_RATIO_TO_HIGH52 = 0.95  # 신고가 대비 최소 근접 비율 (예: 0.98 =
 MAX_RATIO_DIFF_FROM_HIGH52 = 0.5  # 52주 신고가에서 이 비율 이상 벗어난 종목은 제외 (예: 0.10 → 10%)
 
 # Load DEBUG setting
-with open("/Users/hyungseoklee/Documents/Leonardo/backend/cache/settings.json") as f:
+with open(f"{CACHE_DIR}/settings.json") as f:
     settings = json.load(f)
 DEBUG = settings.get("DEBUG", "False") == "True"
 
-holidays_path = "/Users/hyungseoklee/Documents/Leonardo/backend/cache/holidays.csv"
+holidays_path = f"{CACHE_DIR}/holidays.csv"
 holidays = pd.read_csv(holidays_path)
 holiday_dates = set(pd.to_datetime(holidays['날짜'], format="%Y%m%d").dt.date)
+
+def remove_holidays(df):
+    return df.loc[~df.index.to_series().dt.date.isin(holiday_dates)]
 
 def find_52week_high_candidates():
     # KRX 종목 목록 불러오기
@@ -44,8 +48,7 @@ def find_52week_high_candidates():
         name = row['Name']
 
         try:
-            df = fdr.DataReader(code, start, end)
-            df = df.loc[~df.index.to_series().dt.date.isin(holiday_dates)]
+            df = remove_holidays(fdr.DataReader(code, start, end))
             if df.empty or len(df) < 10:
                 continue
 
@@ -54,7 +57,7 @@ def find_52week_high_candidates():
 
             # 🔍 현재가가 52주 신고가의 MIN_RATIO_TO_HIGH52 이상이면서 MAX_RATIO_DIFF_FROM_HIGH52 이내인 경우만 포함
             ratio = current_close / high_52week
-            if MIN_RATIO_TO_HIGH52 <= ratio >= (1 - MAX_RATIO_DIFF_FROM_HIGH52):
+            if MIN_RATIO_TO_HIGH52 <= ratio and ratio >= (1 - MAX_RATIO_DIFF_FROM_HIGH52):
                 results.append({
                     'Code': code,
                     'Name': name,
@@ -76,8 +79,7 @@ def find_52week_high_candidates():
 
 import os
 
-# 종목 정보 CSV 파일 경로
-stock_list_path = "/Users/hyungseoklee/Documents/Leonardo/backend/cache/stock_list.csv"
+stock_list_path = f"{CACHE_DIR}/stock_list.csv"
 
 # 스톡 리스트 로드
 df_stock_info = pd.read_csv(stock_list_path)
@@ -97,7 +99,7 @@ sector_returns = {}
 # 최근 6일치 데이터 (당일 포함 5거래일)
 # 대표 종목으로부터 가장 최근 거래일 구하기
 ref_df = fdr.DataReader("005930", "2024-01-01")
-ref_df = ref_df.loc[~ref_df.index.to_series().dt.date.isin(holiday_dates)]
+ref_df = remove_holidays(ref_df)
 end_date = ref_df.index[-1].date()
 start_date = end_date - timedelta(days=MIN_PERIOD_DAYS * 2)  # 주말과 공휴일 포함 여유 확보
 
@@ -107,8 +109,7 @@ for _, row in tqdm(top_leaders_by_sector.iterrows(), total=top_leaders_by_sector
     code = str(row["Code"]).zfill(6)
     sector = row["Sector"]
     try:
-        df = fdr.DataReader(code, start_date, end_date.strftime('%Y-%m-%d'))
-        df = df.loc[~df.index.to_series().dt.date.isin(holiday_dates)]
+        df = remove_holidays(fdr.DataReader(code, start_date, end_date.strftime('%Y-%m-%d')))
         df = df.tail(MIN_PERIOD_DAYS + 1)
         if len(df) < MIN_PERIOD_DAYS + 1:
             if DEBUG: logger.warning(f"[{code}] {row['Name']} → 데이터 부족 (len={len(df)})")
@@ -118,9 +119,7 @@ for _, row in tqdm(top_leaders_by_sector.iterrows(), total=top_leaders_by_sector
         price_end = df['Close'].iloc[-1]
         ret = (price_end - price_start) / price_start
 
-        if sector not in sector_returns:
-            sector_returns[sector] = []
-        sector_returns[sector].append(ret)
+        sector_returns.setdefault(sector, []).append(ret)
 
     except Exception as e:
         if DEBUG: logger.error(f"[{code}] {row['Name']} 오류: {e}")
@@ -129,29 +128,36 @@ for _, row in tqdm(top_leaders_by_sector.iterrows(), total=top_leaders_by_sector
 # 1) 대장주 MIN_RISING_COUNT개 이상 상승
 # 2) 평균 수익률 MIN_AVG_RETURN 이상
 # 3) (선택적) 하나 이상의 대장주가 STRONG_WINNER_THRESHOLD 이상 수익을 기록한 경우만 인정 (REQUIRE_STRONG_WINNER=True일 때)
-strong_sectors = []
-for sector in sector_returns:
-    returns = sector_returns[sector]
-    rising_count = sum(1 for r in returns if r > 0)
-    avg_return = sum(returns) / len(returns)
-    has_strong_winner = any(r >= STRONG_WINNER_THRESHOLD for r in returns)
-
-    if rising_count >= MIN_RISING_COUNT and avg_return >= MIN_AVG_RETURN:
-        if not REQUIRE_STRONG_WINNER or has_strong_winner:
-            strong_sectors.append(sector)
+strong_sectors = [
+    sector for sector, returns in sector_returns.items()
+    if sum(r > 0 for r in returns) >= MIN_RISING_COUNT
+       and sum(returns) / len(returns) >= MIN_AVG_RETURN
+       and (not REQUIRE_STRONG_WINNER or any(r >= STRONG_WINNER_THRESHOLD for r in returns))
+]
 
 # 🔥 상승 중인 강세 섹터 목록 로깅
 if DEBUG:
     logger.info(f"🔥 상승 중인 강세 섹터 목록: {strong_sectors}")
 
-if __name__ == "__main__":
-    df_result = find_52week_high_candidates()
-    # 코드 포맷 정규화: 6자리 0패딩 문자열로
+def merge_sector_info(df_result, df_stock_info):
     df_result['Code'] = df_result['Code'].astype(str).str.zfill(6)
     df_stock_info['Code'] = df_stock_info['Code'].astype(str).str.zfill(6)
+    return df_result.merge(df_stock_info[['Code', 'Sector']], on='Code', how='left')
 
-    # 🔁 stock_list.csv에서 종목의 섹터 정보를 병합
-    df_result = df_result.merge(df_stock_info[['Code', 'Sector']], on='Code', how='left')
+def filter_by_strong_sector(df_result, strong_sectors):
+    return df_result[df_result['Sector'].isin(strong_sectors)]
+
+def filter_small_caps(df_result, df_stock_info):
+    df_result = df_result.merge(df_stock_info[['Code', 'Market', 'MarketCap']], on='Code', how='left')
+    df_result = df_result[
+        ((df_result['Market'] == 'KOSPI') & (df_result['MarketCap'] >= 500000000000)) |
+        ((df_result['Market'] == 'KOSDAQ') & (df_result['MarketCap'] >= 300000000000))
+    ]
+    return df_result
+
+if __name__ == "__main__":
+    df_result = find_52week_high_candidates()
+    df_result = merge_sector_info(df_result, df_stock_info)
 
     # 🚫 강세 섹터가 없으면 종료
     if not strong_sectors:
@@ -159,18 +165,11 @@ if __name__ == "__main__":
         post_to_slack("⚠️ 강세 섹터가 없어 추천을 종료합니다.")
         exit()
 
-    # 🔎 강세 섹터에 속한 종목만 필터링
-    df_result = df_result[df_result['Sector'].isin(strong_sectors)]
-
-    # 🚫 소형주 필터링: 시장(KOSPI, KOSDAQ)별 기준 적용
-    df_result = df_result.merge(df_stock_info[['Code', 'Market', 'MarketCap']], on='Code', how='left')
-    df_result = df_result[
-        ((df_result['Market'] == 'KOSPI') & (df_result['MarketCap'] >= 500000000000)) |
-        ((df_result['Market'] == 'KOSDAQ') & (df_result['MarketCap'] >= 300000000000))
-    ]
+    df_result = filter_by_strong_sector(df_result, strong_sectors)
+    df_result = filter_small_caps(df_result, df_stock_info)
 
     # ✅ 최종 결과 저장
-    output_path = "/cache/high52.json"
+    output_path = f"{CACHE_DIR}/high52.json"
     df_result = df_result.drop(columns=['MarketCap'], errors='ignore')
     df_result.to_json(output_path, orient='records', force_ascii=False, indent=2)
     if DEBUG: logger.success(f"📊 강세 섹터 내 추천 종목 수: {len(df_result)}개")

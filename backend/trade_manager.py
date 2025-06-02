@@ -62,7 +62,6 @@ class TradeManager:
             return False
 
     async def place_order_with_stoploss(self, stock_code, qty, price, atr, order_type, timeout=5):
-
         order_type_normalized = str(order_type).strip()
 
         if order_type_normalized == "시장가":
@@ -74,15 +73,24 @@ class TradeManager:
 
         logger.debug(f"💬 주문 딕셔너리: stock_code={stock_code}, qty={qty}, price={price}, atr={atr}, order_type={order_type}")
 
+        # 체결 통보 등록: 주문 전에 호출해서 실시간 통보 등록
         try:
-            await self.websocket_manager.run_websocket()
+            await self.websocket_manager.register_execution_notice(self.api, self.websocket_manager.websockets_url)
+            logger.info("✔ 체결 통보 등록 완료")
         except Exception as e:
-            logger.error(f"❌ websocket_manager.run_websocket() 호출 중 예외 발생: {e}")
+            logger.error(f"❌ 체결 통보 등록 중 예외 발생: {e}")
 
         if qty is None:
             logger.warning(f"⚠️ 수량(qty)이 None입니다! stock_code: {stock_code}, 요청 정보 확인 필요.")
 
         logger.info(f"📤 [{stock_code}] {qty}주 주문 실행 (유형: {order_type}, 가격: {price}, ATR: {atr})")
+
+        try:
+            # websocket_manager의 run_websocket()은 별도로 백그라운드 task로 관리하는게 좋음.
+            # 따라서 여기서는 run_websocket() 호출 제거하고 메시지 전송만 처리하도록 개선 권장.
+            pass
+        except Exception as e:
+            logger.error(f"❌ websocket_manager.run_websocket() 호출 중 예외 발생: {e}")
 
         try:
             response = self.api.do_buy(stock_code, qty, ord_unpr, ord_dvsn)
@@ -99,6 +107,16 @@ class TradeManager:
 
         if not response or not response.is_ok():
             error_msg = response.get_error_message() if response else 'API 응답 없음'
+            if not error_msg:
+                try:
+                    resp_text = response._resp.text if response and hasattr(response, "_resp") else None
+                    if resp_text:
+                        import json
+                        msg1 = json.loads(resp_text).get("msg1", "")
+                        error_msg = msg1 if msg1 else "알 수 없는 오류 발생"
+                except Exception as e:
+                    logger.warning(f"응답 메시지 파싱 실패: {e}")
+                    error_msg = "알 수 없는 오류 발생"
             logger.error(f"❌ [{stock_code}] 주문 실패: {error_msg}")
             post_to_slack(f"❌ 주문 실패: {stock_code} → {error_msg}")
             return {"error": f"주문 실패: {error_msg}", "success": False}

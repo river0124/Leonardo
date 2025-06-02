@@ -10,11 +10,9 @@ import os
 import pandas as pd
 from cryptography.fernet import Fernet
 
-
-# 모듈 import (현재 사용하지 않더라도 유지)
 from get_asset import get_total_asset
 from get_candle_data import get_candle_chart_data
-from auto_updaters.watchlist_store import load_watchlist, add_code_to_watchlist, remove_code_from_watchlist
+from watchlist_store import load_watchlist, add_code_to_watchlist, remove_code_from_watchlist
 from utils import KoreaInvestEnv, KoreaInvestAPI
 from stock_name_finder import get_stock_name_by_code
 from trade_manager import TradeManager

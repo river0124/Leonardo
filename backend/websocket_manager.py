@@ -219,7 +219,7 @@ class Websocket_Manager:
         logger.info("한국투자증권 API웹소켓 연결 시도!")
         async with websockets.connect(url, ping_interval=None) as websocket:
             cmd = 7 if self.is_paper else 5
-            send_data = korea_invest_api.get_send_data(cmd=cmd, approval_key=self.websocket_approval_key)
+            send_data = korea_invest_api.get_send_data(cmd=cmd)
             await websocket.send(send_data)
             # TODO: Consider adding timeout or disconnect logic to avoid infinite loop issues
             while True:
@@ -259,7 +259,7 @@ class Websocket_Manager:
         logger.info("한국투자증권 API웹소켓 연결 시도!")
         async with websockets.connect(url, ping_interval=None) as websocket:
             cmd = 8 if self.is_paper else 6
-            send_data = korea_invest_api.get_send_data(cmd=cmd, approval_key=self.websocket_approval_key)
+            send_data = korea_invest_api.get_send_data(cmd=cmd)
             await websocket.send(send_data)
             # TODO: Consider adding timeout or disconnect logic to avoid infinite loop issues
             while True:

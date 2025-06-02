@@ -9,19 +9,13 @@ def main():
     try:
         print("📥 최신 종목 목록을 가져오는 중...")
         df = fdr.StockListing('KRX')[['Name', 'Code', 'Market']]
+        df["Sector1"] = ""
+        df["Sector2"] = ""
         df = df[df["Market"] != "KONEX"]
         df["Code"] = df["Code"].apply(lambda x: str(x).zfill(6))
 
         # 우선주 및 스팩 제외 (정규표현식, warning 방지)
         df = df[~df["Name"].str.contains(r"(?:[0-9]*우(?:B)?|우선주|스팩)", case=False, regex=True)]  # 우선주 및 스팩 제외
-
-        # 섹터 정보 불러오기
-        import pandas as pd
-        sector_path = "/Users/hyungseoklee/Documents/Leonardo/backend/cache/krx_sector_data.csv"
-        sector_df = pd.read_csv(sector_path, dtype={"종목코드": str})
-        sector_df = sector_df.rename(columns={"종목코드": "Code"})
-        sector_grouped = sector_df[["Code", "Sector1"]].rename(columns={"Sector1": "Sector"})
-        df = df.merge(sector_grouped, on="Code", how="left")
 
         import datetime
         from pykrx.stock import get_nearest_business_day_in_a_week
@@ -55,18 +49,18 @@ def main():
         df = df.sort_values(by='Name')
 
         print(f"📊 총 종목 수: {len(df)}")
-        sector_counts = df['Sector'].value_counts(dropna=False)
+        sector_counts = df['Sector1'].value_counts(dropna=False)
         print("📌 섹터별 종목 수:")
         print(sector_counts)
-        print(f"🔢 총 섹터 수: {df['Sector'].nunique(dropna=True)} (NaN 제외)")
+        print(f"🔢 총 섹터 수: {df['Sector1'].nunique(dropna=True)} (NaN 제외)")
 
         # 저장 경로
         leo_project_path = "/Users/hyungseoklee/Documents/Leonardo/backend/cache/stock_list.csv"
-        sector_counts = df['Sector'].value_counts(dropna=False)
+        sector_counts = df['Sector1'].value_counts(dropna=False)
         print("📌 섹터별 종목 수:")
         print(sector_counts)
-        print(f"🔢 총 섹터 수: {df['Sector'].nunique(dropna=True)} (NaN 제외)")
-        df[["Name", "Code", "Market", "MarketCap", "Index", "Sector"]].to_csv(leo_project_path, index=False, encoding="utf-8-sig")
+        print(f"🔢 총 섹터 수: {df['Sector1'].nunique(dropna=True)} (NaN 제외)")
+        df[["Name", "Code", "Market", "MarketCap", "Index", "Sector1", "Sector2"]].to_csv(leo_project_path, index=False, encoding="utf-8-sig")
 
         print(f"✅ stock_list.csv 저장 완료! (경로: {leo_project_path})")
 
