@@ -1,0 +1,11 @@
+pandas
+numpy
+requests
+tqdm
+loguru
+slack_sdk
+FinanceDataReader @ git+https://github.com/FinanceData/FinanceDataReader.git
+pykrx
+beautifulsoup4
+python-dotenv
+pykrx

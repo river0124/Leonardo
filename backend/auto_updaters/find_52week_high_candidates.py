@@ -8,9 +8,11 @@ from tqdm import tqdm
 import numpy as np
 import sys, os
 from datetime import datetime, timedelta
-# from get_investor_and_program_trend import get_foreign_institution_trend, get_foreign_net_trend, get_total_trading_volume
-
+import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from get_total_data_for_candidates import get_foreign_institution_trend,get_foreign_net_trend
+from utils import KoreaInvestAPI, KoreaInvestEnv
+from settings import cfg
 from slack_notifier import post_to_slack
 
 
@@ -82,7 +84,7 @@ def find_52week_high_candidates():
 
 import os
 
-stock_list_path = f"{CACHE_DIR}/stock_list.csv"
+stock_list_path = f"{CACHE_DIR}/stock_list_with_sectors.csv"
 
 # 스톡 리스트 로드
 df_stock_info = pd.read_csv(stock_list_path)
@@ -253,6 +255,70 @@ def score_strong_sector(df_result, strong_sector1, strong_sector2):
     df_result = df_result.sort_values(by='SectorScore', ascending=False)
     return df_result
 
+def get_foreign_institution_trend(stock_code):
+    original_mode = settings.get("is_paper_trading", True)
+
+    if original_mode:
+        cfg["is_paper_trading"] = False
+    else:
+        # logger.info("현재는 실전투자 상태입니다.")
+        pass
+
+    env = KoreaInvestEnv(cfg)
+    api = KoreaInvestAPI(cfg, env.get_base_headers())
+
+    response = api.summarize_foreign_institution_estimates(stock_code)
+    response_json = response.json()
+    output2 = response_json.get("output2", [])
+
+    if output2:
+        # 시간대 기준으로 내림차순 정렬
+        latest = max(output2, key=lambda x: int(x["bsop_hour_gb"]))
+        frgn = int(latest["frgn_fake_ntby_qty"])
+        orgn = int(latest["orgn_fake_ntby_qty"])
+
+        return {"외국인": frgn, "기관": orgn}
+    else:
+        return {"외국인": 0, "기관": 0}
+
+def get_foreign_net_trend(stock_code):
+    original_mode = settings.get("is_paper_trading", True)
+
+    if original_mode:
+        cfg["is_paper_trading"] = False
+    else:
+        # logger.info("현재는 실전투자 상태입니다.")
+        pass
+
+    env = KoreaInvestEnv(cfg)
+    api = KoreaInvestAPI(cfg, env.get_base_headers())
+
+    response = api.summarize_foreign_net_estimates(stock_code)
+    response_json = response.json()
+    output = response_json.get("output", [])
+
+    if output:
+        # 시간대 기준으로 내림차순 정렬
+        latest = max(output, key=lambda x: int(x["bsop_hour"]))
+        glob_ntby_qty = int(latest["glob_ntby_qty"])
+        return {"외국계": glob_ntby_qty}
+    else:
+        return {"외국계": 0}
+
+def get_total_trading_data(stock_code):
+    env = KoreaInvestEnv(cfg)
+    api = KoreaInvestAPI(cfg, env.get_base_headers())
+
+    response = api.get_current_price(stock_code)
+    output = response["output"][0] if isinstance(response.get("output"), list) else response
+
+    # 누적거래량 추출 및 매핑
+    acml_vol = output.get("acml_vol")
+
+    try:
+        return {"누적거래량": int(acml_vol)} if acml_vol is not None else {"누적거래량": 0}
+    except ValueError:
+        return {"누적거래량": 0}
 
 if __name__ == "__main__":
     df_result = find_52week_high_candidates()
@@ -272,10 +338,109 @@ if __name__ == "__main__":
     if DEBUG:
         logger.info(f"✅ 강세 섹터 필터링 후 추가된 종목 수: {added_count}")
 
+    # ✅ 외국인, 기관, 외국계 매수량 데이터 수집 및 추가
+    foreign_orgn_list = []
+    foreign_net_list = []
+    volume_list = []
+
+    for _, row in tqdm(df_result.iterrows(), total=len(df_result), desc="🌍 외국인/기관/외국계 매수량 조회 중"):
+        code = row["Code"]
+        try:
+            trend = get_foreign_institution_trend(code)
+            # 필터: 외국인 또는 기관 순매수 음수면 제외
+            if trend["외국인"] < 0 or trend["기관"] < 0:
+                # logger.debug(f"[FILTERED] {code} 제외됨 - 외국인 또는 기관 순매수 음수")
+                continue
+            # 필터: 주석으로 제거 가능
+            time.sleep(0.4)
+            net = get_foreign_net_trend(code)
+            time.sleep(0.4)
+            volume = get_total_trading_data(code)
+            time.sleep(0.4)
+        except Exception as e:
+            logger.warning(f"[{code}] 외국인/기관/외국계 데이터 조회 실패: {e}")
+            trend = {"외국인": 0, "기관": 0}
+            net = {"외국계": 0}
+            volume = {"누적거래량": 0}
+
+        foreign_orgn_list.append(trend)
+        foreign_net_list.append(net)
+        volume_list.append(volume)
+
+    # 리스트를 DataFrame으로 변환하고 df_result에 병합
+    df_foreign_orgn = pd.DataFrame(foreign_orgn_list)
+    df_foreign_net = pd.DataFrame(foreign_net_list)
+    df_volume = pd.DataFrame(volume_list)
+    df_result = pd.concat([df_result.reset_index(drop=True), df_foreign_orgn, df_foreign_net, df_volume], axis=1)
+
+    def refined_score(row):
+        total_volume = row["누적거래량"]
+        if total_volume <= 0:
+            return 0
+
+        score = 0
+        weights = {}
+
+        # ✅ 1. 개별 주체 스코어링
+        for key in ["기관", "외국인", "외국계"]:
+            buy = row.get(key, 0)
+            ratio = max(0, buy / total_volume)
+            multiplier = 1.0
+            if key == "외국인" and row.get("Market") == "KOSPI":
+                multiplier = 1.2
+            weights[key] = min(3, round(np.log1p(ratio) * 5 * multiplier, 2)) if buy > 0 else 0
+            score += weights[key]
+
+        # ✅ 2. 양매수 조건
+        orgn_buy = row.get("기관", 0)
+        frgn_buy = row.get("외국인", 0)
+        if orgn_buy > 10000000 and frgn_buy > 10000000:
+            score += 2
+        elif orgn_buy > 0 and frgn_buy > 0:
+            score += 1
+        elif orgn_buy > 0 or frgn_buy > 0:
+            score += 0.5
+
+        # ✅ 3. 총매수 강도
+        total_buy = max(0, orgn_buy + frgn_buy + row.get("외국계", 0))
+        ratio = total_buy / total_volume
+        score += min(3.0, round(np.log1p(ratio * 100), 2))
+
+        return round(score, 3)
+
+    df_result["BuyStrengthScore"] = df_result.apply(refined_score, axis=1)
+    df_result = df_result.sort_values(by="BuyStrengthScore", ascending=False)
+    df_result_top10 = df_result.head(10)
+
     # ✅ 최종 결과 저장
     output_path = f"{CACHE_DIR}/high52.json"
     df_result = df_result.drop(columns=['MarketCap'], errors='ignore')
+    logger.info(f"📦 최종 저장할 종목 수: {len(df_result)}개")
     df_result.to_json(output_path, orient='records', force_ascii=False, indent=2)
     post_to_slack(f"✅ 강세 섹터 내 추천 종목 리스트가 저장되었습니다.\n"
                   f"Sector1: {len(strong_sector1)}개, Sector2: {len(strong_sector2)}개\n"
                   f"총 종목 수: {len(df_result)}개")
+
+    top10_path = f"{CACHE_DIR}/high52_top10.json"
+    df_result_top10.to_json(top10_path, orient='records', force_ascii=False, indent=2)
+    # 🏅 상위 추천 종목 리스트 (Top 10)
+    message = ["🏅 상위 추천 종목 리스트 (Top 10):"]
+
+    for idx, row in df_result_top10.iterrows():
+        total_volume = row.get('누적거래량', 0)
+        frgn = row.get('외국인', 0)
+        orgn = row.get('기관', 0)
+        glob = row.get('외국계', 0)
+
+        def pct(value):
+            return f"{value:,} ({(value / total_volume * 100):.1f}%)" if total_volume > 0 else f"{value:,} (0%)"
+
+        msg = (
+            f"{row['Name']} ({row['Code']}): "
+            f"Score = {row['BuyStrengthScore']} | "
+            f"외국인 = {pct(frgn)}, 기관 = {pct(orgn)}, 외국계 = {pct(glob)}"
+        )
+        logger.info(msg)
+        message.append(msg)
+
+    post_to_slack("\n".join(message))

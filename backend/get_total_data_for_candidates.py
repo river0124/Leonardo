@@ -167,60 +167,76 @@ def get_program_trade_summary_by_time(stock_code, market):
 
     return data
 
-def get_total_trading_data(stock_code):
+# def get_total_trading_data(stock_code):
+#
+#     env = KoreaInvestEnv(cfg)
+#     api = KoreaInvestAPI(cfg, env.get_base_headers())
+#
+#     response = api.get_current_price(stock_code)
+#
+#     output = response["output"][0] if isinstance(response.get("output"), list) else response
+#     result = {
+#         "현재가": output.get("stck_prpr"),
+#         "52주 최고가": output.get("w52_hgpr"),
+#         "52주 최고일자": output.get("w52_hgpr_date"),
+#         "52주 최저가": output.get("w52_lwpr"),
+#         "52주 최저일자": output.get("w52_lwpr_date"),
+#         "52주 최고가 대비 현재가 비율": output.get("w52_hgpr_vrss_prpr_ctrt"),
+#         "52주 최저가 대비 현재가 비율": output.get("w52_lwpr_vrss_prpr_ctrt"),
+#         "누적거래량": output.get("acml_vol"),
+#         "250일 최고가": output.get("d250_hgpr"),
+#         "250일 최고일자": output.get("d250_hgpr_date"),
+#         "250일 최저가": output.get("d250_lwpr"),
+#         "250일 최저일자": output.get("d250_lwpr_date"),
+#         "250일 최고가 대비 현재가 비율": output.get("d250_hgpr_vrss_prpr_rate"),
+#         "250일 최저가 대비 현재가 비율": output.get("d250_lwpr_vrss_prpr_rate"),
+#     }
+#
+#     type_map = {
+#         "현재가": int,
+#         "52주 최고가": int,
+#         "52주 최고일자": str,
+#         "52주 최저가": int,
+#         "52주 최저일자": str,
+#         "52주 최고가 대비 현재가 비율": float,
+#         "52주 최저가 대비 현재가 비율": float,
+#         "누적거래량": int,
+#         "250일 최고가": int,
+#         "250일 최고일자": str,
+#         "250일 최저가": int,
+#         "250일 최저일자": str,
+#         "250일 최고가 대비 현재가 비율": float,
+#         "250일 최저가 대비 현재가 비율": float,
+#     }
+#
+#     for key, caster in type_map.items():
+#         if key in result and result[key] is not None:
+#             try:
+#                 result[key] = caster(result[key])
+#             except ValueError:
+#                 pass  # Optionally log or handle conversion error
+#
+#     return result
 
+def get_total_trading_data(stock_code):
     env = KoreaInvestEnv(cfg)
     api = KoreaInvestAPI(cfg, env.get_base_headers())
 
     response = api.get_current_price(stock_code)
-
     output = response["output"][0] if isinstance(response.get("output"), list) else response
-    result = {
-        "현재가": output.get("stck_prpr"),
-        "52주 최고가": output.get("w52_hgpr"),
-        "52주 최고일자": output.get("w52_hgpr_date"),
-        "52주 최저가": output.get("w52_lwpr"),
-        "52주 최저일자": output.get("w52_lwpr_date"),
-        "52주 최고가 대비 현재가 비율": output.get("w52_hgpr_vrss_prpr_ctrt"),
-        "52주 최저가 대비 현재가 비율": output.get("w52_lwpr_vrss_prpr_ctrt"),
-        "누적거래량": output.get("acml_vol"),
-        "250일 최고가": output.get("d250_hgpr"),
-        "250일 최고일자": output.get("d250_hgpr_date"),
-        "250일 최저가": output.get("d250_lwpr"),
-        "250일 최저일자": output.get("d250_lwpr_date"),
-        "250일 최고가 대비 현재가 비율": output.get("d250_hgpr_vrss_prpr_rate"),
-        "250일 최저가 대비 현재가 비율": output.get("d250_lwpr_vrss_prpr_rate"),
-    }
 
-    type_map = {
-        "현재가": int,
-        "52주 최고가": int,
-        "52주 최고일자": str,
-        "52주 최저가": int,
-        "52주 최저일자": str,
-        "52주 최고가 대비 현재가 비율": float,
-        "52주 최저가 대비 현재가 비율": float,
-        "누적거래량": int,
-        "250일 최고가": int,
-        "250일 최고일자": str,
-        "250일 최저가": int,
-        "250일 최저일자": str,
-        "250일 최고가 대비 현재가 비율": float,
-        "250일 최저가 대비 현재가 비율": float,
-    }
+    # 누적거래량 추출 및 매핑
+    acml_vol = output.get("acml_vol")
+    print(acml_vol)
 
-    for key, caster in type_map.items():
-        if key in result and result[key] is not None:
-            try:
-                result[key] = caster(result[key])
-            except ValueError:
-                pass  # Optionally log or handle conversion error
-
-    return result
+    try:
+        return {"누적거래량": int(acml_vol)} if acml_vol is not None else {"누적거래량": 0}
+    except ValueError:
+        return {"누적거래량": 0}
 
 
 if __name__ == "__main__":
     # get_foreign_institution_trend("005930")
-    get_foreign_net_trend("114090")
-    # get_total_trading_data("114090")
+    # get_foreign_net_trend("114090")
+    get_total_trading_data("114090")
     # get_program_trade_summary_by_time("005930", "J")

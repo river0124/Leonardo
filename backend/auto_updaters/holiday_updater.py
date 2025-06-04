@@ -1,9 +1,11 @@
 import requests
-import os
+import os,sys
 import csv
 import time
 from urllib.parse import urlencode
 from datetime import datetime
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from slack_notifier import post_to_slack  # ✅ 슬랙 모듈 추가
 
 class HolidayAPI:
