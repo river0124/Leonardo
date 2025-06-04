@@ -22,16 +22,50 @@ class TradeManager:
         self.order_queue = execution_queue
         self.websocket_manager = Websocket_Manager(cfg, api)
         self.watch_orders = []
+        self.stoploss_cache = set()
+
+    def record_stoploss(self, stock_code, stoploss_price, atr):
+        logger.debug(f"[STOPLOSS] record_stoploss() 시작: stock_code={stock_code}, stoploss_price={stoploss_price}, atr={atr}")
+        try:
+            stoploss_data = {
+                "stock_code": stock_code,
+                "stoploss_price": stoploss_price,
+                "atr": atr,
+                "timestamp": time.time()
+            }
+
+            stoploss_path = os.path.join(CACHE_DIR, "stoploss.json")
+            if os.path.exists(stoploss_path):
+                with open(stoploss_path, "r", encoding="utf-8") as f:
+                    stoploss_json = json.load(f)
+            else:
+                stoploss_json = {}
+
+            stoploss_json[stock_code] = stoploss_data
+            with open(stoploss_path, "w", encoding="utf-8") as f:
+                json.dump(stoploss_json, f, indent=4, ensure_ascii=False)
+
+            logger.info(f"[STOPLOSS] 📝 stoploss 기록 완료: {stock_code} → {stoploss_price}")
+            self.stoploss_cache.add(stock_code)
+        except Exception as e:
+            logger.exception(f"[STOPLOSS] ❌ stoploss 저장 실패: {e}")
 
     async def place_order_with_stoploss(self, stock_code, qty, price, atr, order_type, timeout=5):
         order_type_normalized = str(order_type).strip()
 
-        if order_type_normalized == "시장가":
-            ord_dvsn = ORDER_TYPE_MARKET
-            ord_unpr = "01"
+        logger.debug(f"[DEBUG] 주문 유형 원본: {order_type} | 정규화 후: {order_type_normalized}")
+
+        if order_type_normalized in ["01", "시장가"]:
+            ord_dvsn = ORDER_TYPE_MARKET  # 시장가
+            ord_unpr = "0"
+        elif order_type_normalized in ["00", "지정가"]:
+            ord_dvsn = ORDER_TYPE_LIMIT  # 지정가
+            ord_unpr = str(price)
         else:
-            ord_dvsn = ORDER_TYPE_LIMIT
-            ord_unpr = "00"
+            logger.error(f"❌ 알 수 없는 order_type: {order_type_normalized}")
+            return {"error": f"알 수 없는 주문 유형: {order_type_normalized}", "success": False}
+
+        logger.debug(f"[DEBUG] 결정된 주문 구분 코드: ord_dvsn={ord_dvsn}, ord_unpr={ord_unpr}")
 
         if DEBUG:
             logger.debug(f"💬 주문 딕셔너리: stock_code={stock_code}, qty={qty}, price={price}, atr={atr}, order_type={order_type}")
@@ -47,10 +81,21 @@ class TradeManager:
         asyncio.create_task(self.websocket_manager.run_forever(auto_register_notice=True))
 
         try:
-            await self.websocket_manager.register_execution_notice()
-            if DEBUG:
-                logger.info(f"📡 [{stock_code}] 체결통보 웹소켓 등록 완료")
+            if stock_code in self.websocket_manager.execution_notices:
+                if DEBUG:
+                    logger.debug(f"🔁 [{stock_code}] 이미 체결통보 등록됨. 중복 등록 생략")
+            else:
+                if DEBUG:
+                    logger.debug(f"[WebSocketManager] 새로운 종목 등록 시작: {stock_code}")
+                await self.websocket_manager.register_execution_notice(stock_code)
+                if DEBUG:
+                    logger.debug(f"📡 [{stock_code}] 체결통보 웹소켓 등록 완료")
+            # Listener 등록
+            self.websocket_manager.listener = self
+            # await self.websocket_manager.register_execution_notice()
+            logger.debug(f"[DEBUG] 주문 request payload: {stock_code, qty, ord_unpr, ord_dvsn}")
             response = self.api.do_buy(stock_code, qty, ord_unpr, ord_dvsn)
+            logger.debug(f"[DEBUG] 주문 API 응답 원문: {response}")
         except Exception as e:
             if DEBUG:
                 logger.error(f"❌ [{stock_code}] 주문 요청 중 예외 발생: {e}")
@@ -126,9 +171,26 @@ class TradeManager:
         stock_code = execution_msg["body"]["STCK_SHRN_ISCD"]
         qty_filled = int(execution_msg["body"]["CNTG_QTY"])
 
+        logger.debug(f"[STOPLOSS] 체결 수신: order_id={order_no}, stock_code={stock_code}, qty_filled={qty_filled}")
+
         for order in self.watch_orders:
             if order["order_id"] == order_no and order["stock_code"] == stock_code:
                 order["filled_qty"] += qty_filled
+
+                # 기록용 stoploss 저장
+                stoploss_multiplier = float(cfg.get("stoploss_atr", 2))
+                execution_price = float(execution_msg["body"].get("CNTG_PRC", "0"))
+                logger.debug(f"[STOPLOSS] execution_price={execution_price}, stoploss_multiplier={stoploss_multiplier}, atr={order['atr']}")
+                stoploss_price = execution_price - (stoploss_multiplier * float(order["atr"]))
+
+                if stock_code in self.stoploss_cache:
+                    if DEBUG:
+                        logger.debug(f"[STOPLOSS] {stock_code} 이미 stoploss 저장됨. 중복 저장 생략.")
+                    continue
+
+                logger.debug(f"[STOPLOSS] record_stoploss() 호출 조건 통과 - stock_code={stock_code}")
+                logger.info(f"[STOPLOSS] ✅ record_stoploss 호출: {stock_code}, stoploss_price={stoploss_price}")
+                self.record_stoploss(stock_code, stoploss_price, order["atr"])
 
                 if DEBUG:
                     logger.info(f"📥 {stock_code} {qty_filled}주 체결되었습니다.")

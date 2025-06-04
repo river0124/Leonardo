@@ -24,14 +24,14 @@ def get_dual_period_hot_sectors(
         recent = price_df[price_df["Date"] >= cutoff]
         returns = recent.groupby("Code")["Close"].agg(["first", "last"])
         returns["Return"] = (returns["last"] - returns["first"]) / returns["first"]
-        returns = returns.reset_index().merge(metadata_df[["Code", "Sector"]], on="Code", how="left")
-        returns = returns.dropna(subset=["Sector"])
-        sector_perf = returns.groupby("Sector")["Return"].mean().sort_values(ascending=False)
+        returns = returns.reset_index().merge(metadata_df[["Code", "Sector1"]], on="Code", how="left")
+        returns = returns.dropna(subset=["Sector1"])
+        sector_perf = returns.groupby("Sector1")["Return"].mean().sort_values(ascending=False)
         return sector_perf.head(5).index.tolist()
 
     # Load data
     metadata_df = pd.read_csv(metadata_path, dtype={"Code": str})
-    metadata_df = metadata_df.dropna(subset=["Sector"])
+    metadata_df = metadata_df.dropna(subset=["Sector1"])
     price_df = pd.read_csv(price_data_path, dtype={"Code": str}, parse_dates=["Date"])
 
     top_20 = get_sector_performance(20)
@@ -47,5 +47,5 @@ def get_dual_period_hot_sectors(
 # 예시 사용법:
 hot_sectors = get_dual_period_hot_sectors()
 print("20일 핫섹터:", hot_sectors["20일"])
-# print("60일 핫섹터:", hot_sectors["60일"])
+print("60일 핫섹터:", hot_sectors["60일"])
 # print("공통 섹터:", hot_sectors["공통"])

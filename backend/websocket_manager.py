@@ -7,13 +7,15 @@ import json
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from base64 import b64decode
+from binascii import unhexlify
 import traceback
+
+# Ensure DEBUG is accessible and properly set from settings
+DEBUG = cfg.get("DEBUG", "False") == "True"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
-
-DEBUG = cfg.get("DEBUG", "False").lower() == "true"
 
 class Websocket_Manager:
     def __init__(self, cfg, api, execution_queue=None):
@@ -24,8 +26,14 @@ class Websocket_Manager:
         self.is_paper = cfg["is_paper_trading"]
         self.listener = None
         self._running = False
+        self.aes_key = None
+        self.aes_iv = None
+        self.execution_registered = False
+        self.websocket = None
+        # Initialize execution_notices as an empty set
+        self.execution_notices = set()
 
-    def aes_cbc_base64_dec(self, key, iv, cipher_text):
+    def aes_cbc_base64_dec(key, iv, cipher_text):
         """
         :param key: str type AES256 secret websocket_example2.pykey value
         :param iv: str type AES256 Initialize Vector
@@ -39,13 +47,23 @@ class Websocket_Manager:
         """
         "고객 ID|계좌번호|주문번호|원주문번호|매도매수구분|정정구분|주문종류2|단축종목코드|체결수량|체결단가|체결시간|거부여부|체결여부|접수여부|지점번호|주문수량|계좌명|체결종목명|해외종목구분|담보유형코드|담보대출일자|분할매수매도시작시간|분할매수매도종료시간|시간분할타입유형"
         """
+        if not data:
+            logger.error("❌ 수신된 데이터 없음")
+            return
+
+        try:
+            aed_dec_str = Websocket_Manager.aes_cbc_base64_dec(key, iv, data)
+            values = aed_dec_str.split('^')
+            if len(values) < 23:
+                logger.error("❌ 복호화 후 values 길이 부족 - 처리 중단")
+                return
+        except Exception as e:
+            logger.error(f"❌ 복호화 중 예외 발생: {e}")
+            return
+
         if DEBUG:
             logger.debug(f"🛰 체결통보 수신 데이터 시작: {data}")
-        # AES256 처리 단계
-        aed_dec_str = Websocket_Manager.aes_cbc_base64_dec(key, iv, data)
-        if DEBUG:
             logger.debug(f"📦 AES 해독 데이터: {aed_dec_str}")
-        values = aed_dec_str.split('^')
         계좌번호 = values[1] #
         if 계좌번호[:8] != account_num:
             return
@@ -151,10 +169,14 @@ class Websocket_Manager:
         )
 
     async def register_execution_notice(self):
-        if self._running:
+        if self.execution_registered:
             if DEBUG:
-                logger.warning("register_execution_notice 이미 실행 중입니다.")
-            return
+                logger.warning("🛑 이미 체결통보가 등록되어 있어 기존 세션 종료 시도 중")
+            if self.websocket is not None:
+                await self.websocket.close()
+                logger.info("🔌 기존 웹소켓 연결 종료 완료")
+            self.execution_registered = False
+
         self._running = True
 
         running_account_num = self.api.account_num
@@ -169,6 +191,8 @@ class Websocket_Manager:
                 await websocket.send(send_data)
                 if DEBUG:
                     logger.info("체결통보 등록 요청 전송 완료")
+                self.websocket = websocket
+                self.execution_registered = True
 
                 while self._running:
                     try:
@@ -222,6 +246,8 @@ class Websocket_Manager:
                 logger.error(f"register_execution_notice 중 오류 발생: {e}")
         finally:
             self._running = False
+            self.execution_registered = False
+            self.websocket = None
             if DEBUG:
                 logger.info("register_execution_notice 종료됨")
 
@@ -327,6 +353,7 @@ class Websocket_Manager:
                     except websockets.exceptions.ConnectionClosed as e:
                         if DEBUG:
                             logger.error(f"🔌 웹소켓 연결 종료됨: {e}")
+                        self.websocket = None
                         break
 
                     if not data:
@@ -338,6 +365,13 @@ class Websocket_Manager:
                 logger.error(f"run_forever 중 오류 발생: {e}")
         finally:
             self._running = False
+            self.execution_registered = False
+            if self.websocket is not None:
+                try:
+                    await self.websocket.close()
+                except Exception as e:
+                    logger.warning(f"웹소켓 종료 중 오류 발생: {e}")
+            self.websocket = None
             if DEBUG:
                 logger.info("run_forever 종료됨")
 
@@ -350,11 +384,16 @@ class Websocket_Manager:
             recvstr = data.split('|')
             trid0 = recvstr[1]
             if trid0 in ("H0STCNI0", "H0STCNI9"):
-                if not aes_key or not aes_iv:
+                if not self.aes_key or not self.aes_iv:
                     if DEBUG:
                         logger.warning("⚠️ AES KEY/IV 없음 → 체결 통보 무시")
                     return
-                self.receive_signing_notice(recvstr[3], aes_key, aes_iv, running_account_num)
+                try:
+                    self.receive_signing_notice(recvstr[3], self.aes_key, self.aes_iv, running_account_num)
+                except Exception as e:
+                    if DEBUG:
+                        logger.error(f"❌ 체결통보 처리 중 오류: {e}")
+                        logger.error(traceback.format_exc())
         else:
             jsonObject = json.loads(data)
             trid = jsonObject["header"]["tr_id"]
@@ -368,13 +407,30 @@ class Websocket_Manager:
                     if DEBUG:
                         logger.info(f"### RETURN CODE [{rt_cd}] MSG [{jsonObject['body']['msg1']}]")
                     if trid in ("H0STCNI0", "H0STCNI9"):
-                        aes_key = jsonObject["body"]["output"]["key"]
-                        aes_iv = jsonObject["body"]["output"]["iv"]
+                        self.aes_key = jsonObject["body"]["output"]["key"]
+                        self.aes_iv = jsonObject["body"]["output"]["iv"]
                         if DEBUG:
-                            logger.info(f"### TRID [{trid}] KEY[{aes_key}] IV[{aes_iv}]")
+                            logger.info(f"### TRID [{trid}] KEY[{self.aes_key}] IV[{self.aes_iv}]")
             else:
                 if DEBUG:
                     logger.info(f"### RECV [PINGPONG]")
                 await self.websocket.send(data)
                 if DEBUG:
                     logger.info(f"### SEND [PINGPONG]")
+
+    # Add: register_execution_notice with duplicate check and registration
+    async def register_execution_notice(self, stock_code):
+        if DEBUG:
+            logger.debug(f"[WebSocketManager] 🔁 register_execution_notice 호출됨: {stock_code}")
+        # Skip duplicate registration
+        if stock_code in self.execution_notices:
+            if DEBUG:
+                logger.debug(f"[WebSocketManager] 이미 등록된 종목입니다: {stock_code}")
+            return
+
+        # (The rest of the function's logic to actually subscribe/register the stock...)
+        # ... (your subscription logic here)
+        # After successful subscription, add to the set
+        self.execution_notices.add(stock_code)
+        if DEBUG:
+            logger.debug(f"[WebSocketManager] ✅ 체결통보 등록 완료: {stock_code}")

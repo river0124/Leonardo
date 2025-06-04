@@ -1,4 +1,4 @@
-# tqdm 설치: pip install tqdm
+
 from loguru import logger
 import pandas as pd
 import FinanceDataReader as fdr

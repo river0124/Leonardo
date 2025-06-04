@@ -3,7 +3,7 @@ import websockets
 import asyncio
 
 #from trade_manager import execution_queue
-from test import execution_queue
+from get_total_data_for_candidates import execution_queue
 
 from loguru import logger
 
