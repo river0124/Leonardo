@@ -7,9 +7,12 @@ import sys
 import json
 import datetime
 import os
+from dotenv import load_dotenv
 import pandas as pd
 from cryptography.fernet import Fernet
 from settings import cfg
+
+load_dotenv(dotenv_path='.env.local')  # .env.local 파일에서 환경변수 로드
 
 from get_asset import get_total_asset
 from get_candle_data import get_candle_chart_data
@@ -21,11 +24,18 @@ from settings import load_settings, save_settings
 from loguru import logger
 
 # --- 경로 설정 ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_DIR = os.path.join(BASE_DIR, "cache")
-SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
-STOCK_LIST_CSV = os.path.join(CACHE_DIR, "stock_list.csv")
-FERNET_KEY_FILE = os.path.join(CACHE_DIR, "key.secret")
+APP_ENV = os.getenv('APP_ENV', 'local')
+
+if APP_ENV == 'local':
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    CACHE_DIR = os.path.join(BASE_DIR, 'cache')
+else:  # server
+    BASE_DIR = '/home/ubuntu/backend'
+    CACHE_DIR = os.path.join(BASE_DIR, 'cache')
+
+SETTINGS_FILE = os.path.join(CACHE_DIR, 'settings.json')
+STOCK_LIST_CSV = os.path.join(CACHE_DIR, 'stock_list.csv')
+FERNET_KEY_FILE = os.path.join(CACHE_DIR, 'key.secret')
 
 # --- 암호화 키 준비 ---
 if os.path.exists(FERNET_KEY_FILE):
@@ -512,3 +522,5 @@ if __name__ == '__main__':
 
     threading.Thread(target=loop.run_forever, daemon=True).start()
     app.run(debug=True, use_reloader=False)
+
+    # app.run(host="0.0.0.0", port=5000, debug=True)

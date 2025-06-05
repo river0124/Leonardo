@@ -66,4 +66,6 @@ leonardo_ai/**/cache/
 
 # Environment
 .env
+.env.local
+.env.prod
 .bash_profile

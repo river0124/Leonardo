@@ -1,6 +1,7 @@
 import asyncio
 from loguru import logger
 import os
+from dotenv import load_dotenv
 from settings import cfg
 import websockets
 import json
@@ -10,12 +11,11 @@ from base64 import b64decode
 from binascii import unhexlify
 import traceback
 
-# Ensure DEBUG is accessible and properly set from settings
+load_dotenv(dotenv_path='.env.local')
 DEBUG = cfg.get("DEBUG", "False") == "True"
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_DIR = os.path.join(BASE_DIR, "cache")
+CACHE_DIR = os.getenv('CACHE_DIR')
 SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
+STOPLOSS_FILE_NAME = os.path.join(CACHE_DIR, "stoploss.json")
 
 class Websocket_Manager:
     def __init__(self, cfg, api, execution_queue=None):

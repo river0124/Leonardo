@@ -1,17 +1,20 @@
+
 import copy
 import json
 import time
 from collections import namedtuple
-import traceback
 import pandas as pd
 import requests
 from loguru import logger
 import os
+from dotenv import load_dotenv
+
 from settings import cfg
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_DIR = os.path.join(BASE_DIR, "cache")
-SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
+BASE_DIR = os.getenv('BASE_DIR', os.path.dirname(os.path.abspath(__file__)))
+CACHE_DIR = os.getenv('CACHE_DIR', os.path.join(BASE_DIR, 'cache'))
+SETTINGS_FILE = os.getenv('SETTINGS_FILE', os.path.join(CACHE_DIR, 'settings.json'))
+load_dotenv(dotenv_path='.env.local')
 
 DEBUG = cfg.get("DEBUG", "False").lower() == "true"
 
