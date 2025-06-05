@@ -70,7 +70,7 @@ def main():
             cap_df.index = cap_df.index.map(lambda x: str(x).zfill(6))
         cap = kospi_cap.combine_first(kosdaq_cap).reset_index()
         cap.columns = ["Code", "MarketCap"]
-        cap["MarketCap"] = cap["MarketCap"].astype(float)
+        cap["MarketCap"] = cap["MarketCap"].astype("Int64")
         df = df.merge(cap, on="Code", how="left")
 
         # 6. KOSPI200, KOSDAQ150 포함 여부 체크

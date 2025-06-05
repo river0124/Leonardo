@@ -9,6 +9,8 @@ import numpy as np
 import sys, os
 from datetime import datetime, timedelta
 import time
+from FinanceDataReader import DataReader
+from typing import List
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from get_total_data_for_candidates import get_foreign_institution_trend,get_foreign_net_trend
 from utils import KoreaInvestAPI, KoreaInvestEnv
@@ -243,6 +245,30 @@ def filter_small_caps(df_result, df_stock_info):
     ]
     return df_result
 
+# 💰 평균 거래대금 필터 함수
+def filter_by_average_trading_value(df_result, min_avg_value=500_000_000):
+
+    filtered_rows = []
+    end_date = datetime.today()
+    start_date = end_date - timedelta(days=40)  # 공휴일/주말 고려 여유 확보
+
+    for _, row in tqdm(df_result.iterrows(), total=len(df_result), desc="💰 평균 거래대금 필터링 중"):
+        code = row["Code"]
+        try:
+            df = remove_holidays(DataReader(code, start_date, end_date))
+            df = df.tail(20)
+            if df.empty or len(df) < 10:
+                continue
+            df["TradingValue"] = df["Close"] * df["Volume"]
+            avg_value = df["TradingValue"].mean()
+            if avg_value >= min_avg_value:
+                filtered_rows.append(row)
+        except Exception as e:
+            logger.warning(f"[{code}] 평균 거래대금 필터 오류: {e}")
+            continue
+
+    return pd.DataFrame(filtered_rows)
+
 # Sector1, Sector2 모두에 속한 종목은 추가 점수를 받아 상위로 정렬되도록 점수화 함수 (점수 방식 변경)
 def score_strong_sector(df_result, strong_sector1, strong_sector2):
     def calc_score(row):
@@ -320,24 +346,56 @@ def get_total_trading_data(stock_code):
     except ValueError:
         return {"누적거래량": 0}
 
-if __name__ == "__main__":
-    df_result = find_52week_high_candidates()
-    df_result = merge_sector_info(df_result, df_stock_info)
+# --- refined_score 함수 이동: 여기로 ---
+def refined_score(row):
+    total_volume = row["누적거래량"]
+    if total_volume <= 0:
+        return 0
 
-    # 🚫 강세 섹터가 없으면 종료
-    if not strong_sector1 and not strong_sector2:
-        if DEBUG: logger.info("⚠️ 강세 섹터가 없어 추천을 종료합니다.")
-        post_to_slack("⚠️ 강세 섹터가 없어 추천을 종료합니다.")
-        exit()
+    score = 0
+    weights = {}
 
-    df_result = filter_by_strong_sector(df_result, strong_sector1, strong_sector2)
-    df_result = filter_small_caps(df_result, df_stock_info)
-    df_result = score_strong_sector(df_result, strong_sector1, strong_sector2)
-    df_result = df_result.sort_values(by='SectorScore', ascending=False)
-    added_count = len(df_result)
-    if DEBUG:
-        logger.info(f"✅ 강세 섹터 필터링 후 추가된 종목 수: {added_count}")
+    # ✅ 1. 개별 주체 스코어링
+    for key in ["기관", "외국인", "외국계"]:
+        buy = row.get(key, 0)
+        ratio = max(0, buy / total_volume)
+        multiplier = 1.0
+        if key == "외국인" and row.get("Market") == "KOSPI":
+            multiplier = 1.2
+        weights[key] = min(3, round(np.log1p(ratio) * 5 * multiplier, 2)) if buy > 0 else 0
+        score += weights[key]
 
+    # ✅ 2. 양매수 조건
+    orgn_buy = row.get("기관", 0)
+    frgn_buy = row.get("외국인", 0)
+    if orgn_buy > 10000000 and frgn_buy > 10000000:
+        score += 2
+    elif orgn_buy > 0 and frgn_buy > 0:
+        score += 1
+    elif orgn_buy > 0 or frgn_buy > 0:
+        score += 0.5
+
+    # ✅ 3. 총매수 강도
+    total_buy = max(0, orgn_buy + frgn_buy + row.get("외국계", 0))
+    ratio = total_buy / total_volume
+    score += min(3.0, round(np.log1p(ratio * 100), 2))
+
+    return round(score, 3)
+
+# --- 추가: total buying pressure filter 함수 ---
+def filter_by_total_buying_pressure(df):
+    def is_strong_buying(row):
+        total_volume = row.get("누적거래량", 0)
+        if total_volume == 0:
+            return False
+        foreign_half = row.get("외국계", 0) * 0.5
+        institution = row.get("기관", 0)
+        foreign = row.get("외국인", 0)
+        total_buying = foreign_half + institution + foreign
+        return total_buying / total_volume >= 0.3
+    return df[df.apply(is_strong_buying, axis=1)]
+
+def collect_buying_trend_data(df_result):
     # ✅ 외국인, 기관, 외국계 매수량 데이터 수집 및 추가
     foreign_orgn_list = []
     foreign_net_list = []
@@ -348,9 +406,9 @@ if __name__ == "__main__":
         try:
             trend = get_foreign_institution_trend(code)
             # 필터: 외국인 또는 기관 순매수 음수면 제외
-            if trend["외국인"] < 0 or trend["기관"] < 0:
-                # logger.debug(f"[FILTERED] {code} 제외됨 - 외국인 또는 기관 순매수 음수")
-                continue
+            # if trend["외국인"] < 0 or trend["기관"] < 0:
+            #     # logger.debug(f"[FILTERED] {code} 제외됨 - 외국인 또는 기관 순매수 음수")
+            #     continue
             # 필터: 주석으로 제거 가능
             time.sleep(0.4)
             net = get_foreign_net_trend(code)
@@ -373,59 +431,16 @@ if __name__ == "__main__":
     df_volume = pd.DataFrame(volume_list)
     df_result = pd.concat([df_result.reset_index(drop=True), df_foreign_orgn, df_foreign_net, df_volume], axis=1)
 
-    def refined_score(row):
-        total_volume = row["누적거래량"]
-        if total_volume <= 0:
-            return 0
-
-        score = 0
-        weights = {}
-
-        # ✅ 1. 개별 주체 스코어링
-        for key in ["기관", "외국인", "외국계"]:
-            buy = row.get(key, 0)
-            ratio = max(0, buy / total_volume)
-            multiplier = 1.0
-            if key == "외국인" and row.get("Market") == "KOSPI":
-                multiplier = 1.2
-            weights[key] = min(3, round(np.log1p(ratio) * 5 * multiplier, 2)) if buy > 0 else 0
-            score += weights[key]
-
-        # ✅ 2. 양매수 조건
-        orgn_buy = row.get("기관", 0)
-        frgn_buy = row.get("외국인", 0)
-        if orgn_buy > 10000000 and frgn_buy > 10000000:
-            score += 2
-        elif orgn_buy > 0 and frgn_buy > 0:
-            score += 1
-        elif orgn_buy > 0 or frgn_buy > 0:
-            score += 0.5
-
-        # ✅ 3. 총매수 강도
-        total_buy = max(0, orgn_buy + frgn_buy + row.get("외국계", 0))
-        ratio = total_buy / total_volume
-        score += min(3.0, round(np.log1p(ratio * 100), 2))
-
-        return round(score, 3)
+    df_result = filter_by_total_buying_pressure(df_result)
 
     df_result["BuyStrengthScore"] = df_result.apply(refined_score, axis=1)
     df_result = df_result.sort_values(by="BuyStrengthScore", ascending=False)
-    df_result_top10 = df_result.head(10)
+    return df_result
 
-    # ✅ 최종 결과 저장
-    output_path = f"{CACHE_DIR}/high52.json"
-    df_result = df_result.drop(columns=['MarketCap'], errors='ignore')
-    logger.info(f"📦 최종 저장할 종목 수: {len(df_result)}개")
-    df_result.to_json(output_path, orient='records', force_ascii=False, indent=2)
-    post_to_slack(f"✅ 강세 섹터 내 추천 종목 리스트가 저장되었습니다.\n"
-                  f"Sector1: {len(strong_sector1)}개, Sector2: {len(strong_sector2)}개\n"
-                  f"총 종목 수: {len(df_result)}개")
 
-    top10_path = f"{CACHE_DIR}/high52_top10.json"
-    df_result_top10.to_json(top10_path, orient='records', force_ascii=False, indent=2)
-    # 🏅 상위 추천 종목 리스트 (Top 10)
-    message = ["🏅 상위 추천 종목 리스트 (Top 10):"]
-
+# 🏅 상위 추천 종목 메시지 포매팅 함수
+def format_top_messages(df_result_top10) -> List[str]:
+    message = ["🏅 상위 추천 종목 리스트:"]
     for idx, row in df_result_top10.iterrows():
         total_volume = row.get('누적거래량', 0)
         frgn = row.get('외국인', 0)
@@ -442,5 +457,42 @@ if __name__ == "__main__":
         )
         logger.info(msg)
         message.append(msg)
+    return message
 
+
+if __name__ == "__main__":
+    df_result = find_52week_high_candidates()
+    df_result = filter_by_average_trading_value(df_result, min_avg_value=500_000_000)
+    df_result = merge_sector_info(df_result, df_stock_info)
+
+    # 🚫 강세 섹터가 없으면 종료
+    if not strong_sector1 and not strong_sector2:
+        if DEBUG: logger.info("⚠️ 강세 섹터가 없어 추천을 종료합니다.")
+        post_to_slack("⚠️ 강세 섹터가 없어 추천을 종료합니다.")
+        exit()
+
+    df_result = filter_by_strong_sector(df_result, strong_sector1, strong_sector2)
+    df_result = filter_small_caps(df_result, df_stock_info)
+    df_result = score_strong_sector(df_result, strong_sector1, strong_sector2)
+    df_result = df_result.sort_values(by='SectorScore', ascending=False)
+    added_count = len(df_result)
+    if DEBUG:
+        logger.info(f"✅ 강세 섹터 필터링 후 추가된 종목 수: {added_count}")
+
+    df_result = collect_buying_trend_data(df_result)
+    df_result_top = df_result
+
+    # ✅ 최종 결과 저장
+    output_path = f"{CACHE_DIR}/high52.json"
+    df_result = df_result.drop(columns=['MarketCap'], errors='ignore')
+    logger.info(f"📦 최종 저장할 종목 수: {len(df_result)}개")
+    df_result.to_json(output_path, orient='records', force_ascii=False, indent=2)
+    post_to_slack(f"✅ 강세 섹터 내 추천 종목 리스트가 저장되었습니다.\n"
+                  f"Sector1: {len(strong_sector1)}개, Sector2: {len(strong_sector2)}개\n"
+                  f"총 종목 수: {len(df_result)}개")
+
+    top10_path = f"{CACHE_DIR}/high52_top.json"
+    df_result_top.to_json(top10_path, orient='records', force_ascii=False, indent=2)
+    # 🏅 상위 추천 종목 리스트 (Top 10)
+    message = format_top_messages(df_result_top)
     post_to_slack("\n".join(message))

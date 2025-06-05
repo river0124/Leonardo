@@ -1,9 +1,11 @@
 import asyncio
 from loguru import logger
 import os
+import json
 from settings import cfg
 from slack_notifier import post_to_slack
 import time
+from hoga_scale import adjust_price_to_hoga
 from websocket_manager import Websocket_Manager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,7 +37,8 @@ class TradeManager:
             }
 
             stoploss_path = os.path.join(CACHE_DIR, "stoploss.json")
-            if os.path.exists(stoploss_path):
+            # Handle empty file case before json.load
+            if os.path.exists(stoploss_path) and os.path.getsize(stoploss_path) > 0:
                 with open(stoploss_path, "r", encoding="utf-8") as f:
                     stoploss_json = json.load(f)
             else:
@@ -78,7 +81,7 @@ class TradeManager:
             logger.info(f"📤 [{stock_code}] {qty}주 주문 실행 (유형: {order_type}, 가격: {price}, ATR: {atr})")
 
         # WebSocket 실시간 수신 루프 시작 (체결통보 등록 포함)
-        asyncio.create_task(self.websocket_manager.run_forever(auto_register_notice=True))
+        # asyncio.create_task(self.websocket_manager.run_forever(auto_register_notice=True))
 
         try:
             if stock_code in self.websocket_manager.execution_notices:
@@ -166,46 +169,15 @@ class TradeManager:
             "message": f"[{stock_code}] 주문번호 {order_id} 감시 등록 완료."
         }
 
-    async def handle_execution(self, execution_msg):
-        order_no = execution_msg["body"]["ODER_NO"]
-        stock_code = execution_msg["body"]["STCK_SHRN_ISCD"]
-        qty_filled = int(execution_msg["body"]["CNTG_QTY"])
-
-        logger.debug(f"[STOPLOSS] 체결 수신: order_id={order_no}, stock_code={stock_code}, qty_filled={qty_filled}")
-
-        for order in self.watch_orders:
-            if order["order_id"] == order_no and order["stock_code"] == stock_code:
-                order["filled_qty"] += qty_filled
-
-                # 기록용 stoploss 저장
-                stoploss_multiplier = float(cfg.get("stoploss_atr", 2))
-                execution_price = float(execution_msg["body"].get("CNTG_PRC", "0"))
-                logger.debug(f"[STOPLOSS] execution_price={execution_price}, stoploss_multiplier={stoploss_multiplier}, atr={order['atr']}")
-                stoploss_price = execution_price - (stoploss_multiplier * float(order["atr"]))
-
-                if stock_code in self.stoploss_cache:
-                    if DEBUG:
-                        logger.debug(f"[STOPLOSS] {stock_code} 이미 stoploss 저장됨. 중복 저장 생략.")
-                    continue
-
-                logger.debug(f"[STOPLOSS] record_stoploss() 호출 조건 통과 - stock_code={stock_code}")
-                logger.info(f"[STOPLOSS] ✅ record_stoploss 호출: {stock_code}, stoploss_price={stoploss_price}")
-                self.record_stoploss(stock_code, stoploss_price, order["atr"])
-
-                if DEBUG:
-                    logger.info(f"📥 {stock_code} {qty_filled}주 체결되었습니다.")
-                post_to_slack(f"📥 {stock_code} {qty_filled}주 체결되었습니다.")
-
-                if order["filled_qty"] >= order["qty"]:
-                    if DEBUG:
-                        logger.info(f"✅ {stock_code} 전체 {order['qty']}주 매수가 완료되었습니다.")
-                    post_to_slack(f"✅ {stock_code} 전체 {order['qty']}주 매수가 완료되었습니다.")
-                    await self.websocket_manager.unregister_execution_notice(stock_code)
-                    self.watch_orders.remove(order)
-                break
-        else:
-            if DEBUG:
-                logger.warning(f"📛 체결 메시지 무시됨. 일치하는 주문 없음: order_no={order_no}, stock_code={stock_code}")
+    async def handle_execution(self, order_no, stock_code, qty_filled, execution_price, execution_status, atr=5000):
+        # 체결되었다고 가정하고 stoploss 기록
+        try:
+            stoploss_multiplier = adjust_price_to_hoga(int(self.cfg.get("stoploss_atr", 2)))
+            stoploss_price = adjust_price_to_hoga(int(execution_price) - (stoploss_multiplier * int(atr)))
+            logger.info(f"[ORDER] ✅ place_order_with_stoploss에서 stoploss 기록: {stock_code}, stoploss_price={stoploss_price}")
+            self.record_stoploss(stock_code, stoploss_price, atr)
+        except Exception as e:
+            logger.exception(f"[ORDER] ❌ stoploss 기록 중 오류 발생 (place_order_with_stoploss): {e}")
 
     async def process_execution_queue(self):
         while True:
@@ -245,9 +217,36 @@ class TradeManager:
         WebsocketManager가 실시간 체결 메시지를 전달할 때 호출됨.
         체결 메시지를 내부 handle_execution()으로 위임 처리.
         """
+        logger.debug(f"리스너 진입!!!!!")
         try:
-            if message.get("body") and "ODER_NO" in message["body"]:
-                await self.handle_execution(message)
+            order_no = message.get("주문번호")
+            stock_code = message.get("종목코드")
+            stock_name = message.get("종목명")
+            qty_filled = message.get("체결수량")
+            execution_price = message.get("체결가격")
+            execution_time = message.get("시간")
+            order_type = message.get("주문구분")
+            execution_status = message.get("체결여부")
+
+            logger.debug(f"""
+            [WS 체결 메시지 수신]
+            ▶ 주문번호: {order_no}
+            ▶ 종목코드: {stock_code}
+            ▶ 종목명: {stock_name}
+            ▶ 체결수량: {qty_filled}
+            ▶ 체결가격: {execution_price}
+            ▶ 시간: {execution_time}
+            ▶ 주문구분: {order_type}
+            ▶ 체결여부: {execution_status}
+            """)
+
+            if execution_status == "1":
+                if DEBUG:
+                    logger.debug(f"[WS] 체결여부가 '1' (미체결) 상태로 확인되어 처리 생략: 주문번호={order_no}")
+                return
+
+            logger.debug(f"[WS] handle_execution 호출 직전 message 로그(이게 나와야함!!!): {message}")
+            await self.handle_execution(order_no, stock_code, qty_filled, execution_price, execution_status)
         except Exception as e:
             if DEBUG:
                 logger.error(f"❌ 실시간 체결 메시지 처리 중 오류 발생: {e}")
