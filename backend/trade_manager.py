@@ -9,7 +9,7 @@ import time
 from hoga_scale import adjust_price_to_hoga
 from websocket_manager import Websocket_Manager
 
-dotenv.load_dotenv(dotenv_path='.env.local')
+dotenv.load_dotenv()
 CACHE_DIR = os.getenv('CACHE_DIR')
 
 ORDER_TYPE_LIMIT = "00"  # 지정가
@@ -26,7 +26,7 @@ class TradeManager:
         self.watch_orders = []
         self.stoploss_cache = set()
 
-    async def place_order_with_stoploss(self, stock_code, qty, price, atr, order_type, timeout=5):
+    async def place_order_with_stoploss(self, stock_code, qty, price, atr, order_type):
         """
         🛒 스톱로스를 포함한 매수 주문을 실행하고 체결 감시 등록까지 수행하는 함수
 
@@ -45,6 +45,7 @@ class TradeManager:
         - 주문번호가 존재하면 내부 감시 리스트(self.watch_orders)에 등록
         - 에러 발생 시 슬랙 알림 전송
         """
+
         order_type_normalized = str(order_type).strip()
 
         if DEBUG: logger.debug(f"[DEBUG] 주문 유형 원본: {order_type} | 정규화 후: {order_type_normalized}")
@@ -68,15 +69,12 @@ class TradeManager:
 
         if DEBUG: logger.info(f"📤 [{stock_code}] {qty}주 주문 실행 (유형: {order_type}, 가격: {price}, ATR: {atr})")
 
-        # WebSocket 실시간 수신 루프 시작 (체결통보 등록 포함)
-        # asyncio.create_task(self.websocket_manager.run_forever(auto_register_notice=True))
-
         try:
             if stock_code in self.websocket_manager.execution_notices:
                 if DEBUG: logger.debug(f"🔁 [{stock_code}] 이미 체결통보 등록됨. 중복 등록 생략")
             else:
                 if DEBUG: logger.debug(f"[WebSocketManager] 새로운 종목 등록 시작: {stock_code}")
-                await self.websocket_manager.register_execution_notice(stock_code)
+                await self.websocket_manager.register_execution_notice()
                 if DEBUG: logger.debug(f"📡 [{stock_code}] 체결통보 웹소켓 등록 완료")
             # Listener 등록
             self.websocket_manager.listener = self
@@ -124,16 +122,16 @@ class TradeManager:
             post_to_slack(f"❌ 주문 응답 본문 오류: {stock_code}")
             return {"error": "주문 응답 본문 오류", "success": False}
 
-        self.watch_orders.append({
+        self.watch_orders[stock_code] = {
             "stock_code": stock_code,
             "order_id": order_id,
             "qty": qty,
-            "atr": atr,
+            "ATR": atr,
             "price": price,
             "order_time": time.time(),
-            "timeout": timeout,
-            "filled_qty": 0,
-        })
+            "filled_qty": 0
+        }
+
         if DEBUG: logger.debug(f"📊 현재 감시 중인 주문 수: {len(self.watch_orders)}")
 
         if DEBUG: logger.info(f"✅ [{stock_code}] 주문 성공 및 감시 등록 완료. 주문번호: {order_id}")
@@ -146,7 +144,10 @@ class TradeManager:
             "message": f"[{stock_code}] 주문번호 {order_id} 감시 등록 완료."
         }
 
-    async def handle_execution(self, order_no, stock_code, qty_filled, execution_price, execution_status, atr=5000):
+    async def handle_execution(self, order_no, stock_code, qty_filled, execution_price, execution_status):
+        print(self.watch_orders)
+        atr = self.watch_orders[stock_code]["atr"]
+
         """
         ✅ 실시간 체결 메시지를 기반으로 스톱로스를 계산하고 기록하는 함수
 
@@ -166,6 +167,16 @@ class TradeManager:
             stoploss_price = adjust_price_to_hoga(int(execution_price) - (stoploss_multiplier * int(atr)))
             if DEBUG: logger.info(f"[ORDER] ✅ place_order_with_stoploss에서 stoploss 기록: {stock_code}, stoploss_price={stoploss_price}")
             self.record_stoploss(stock_code, stoploss_price, atr)
+
+            # 한주라도 체결되면 해당종목의 호가, 체결 등록
+            await self.websocket_manager.register_hoga(stock_code)
+            await self.websocket_manager.register_execution_list(stock_code)
+
+            # 체결 완료 후 체결통보 등록 해제
+            await self.websocket_manager.unregister_execution_notice()
+            if DEBUG:
+                logger.info(f"[ORDER] ✅ 체결 완료, 체결통보 등록 해제")
+
         except Exception as e:
             if DEBUG: logger.exception(f"[ORDER] ❌ stoploss 기록 중 오류 발생 (place_order_with_stoploss): {e}")
 
@@ -212,16 +223,15 @@ class TradeManager:
             except Exception as e:
                 if DEBUG: logger.error(f"❌ 큐 처리 중 오류 발생: {e}", exc_info=True)
 
-    async def handle_ws_message(self, message: dict):
+    async def handle_execution_notice_message(self, message: dict):
         """
         📡 WebSocket 체결 메시지를 처리하여 내부 로직으로 전달하는 함수
-
         - message: 실시간 체결 메시지 (dict 형태)
-
         기능:
         - 체결 메시지에서 필요한 변수 추출
         - 체결여부가 2일 경우에만 handle_execution() 호출
         """
+
         if DEBUG: logger.info(f"리스너 진입!!!!!")
         try:
             order_no = message.get("주문번호")

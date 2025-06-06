@@ -1,4 +1,3 @@
-
 import copy
 import json
 import time
@@ -7,14 +6,15 @@ import pandas as pd
 import requests
 from loguru import logger
 import os
-from dotenv import load_dotenv
-
+from dotenv import load_dotenv, dotenv_values
+import settings
 from settings import cfg
+
 
 BASE_DIR = os.getenv('BASE_DIR', os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.getenv('CACHE_DIR', os.path.join(BASE_DIR, 'cache'))
 SETTINGS_FILE = os.getenv('SETTINGS_FILE', os.path.join(CACHE_DIR, 'settings.json'))
-load_dotenv(dotenv_path='.env.local')
+load_dotenv()
 
 DEBUG = cfg.get("DEBUG", "False").lower() == "true"
 
@@ -25,19 +25,16 @@ os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 # 로그 파일 설정
 logger.add(LOG_PATH, rotation="10 MB", retention="10 days", encoding="utf-8", enqueue=True)
 
-def create_env_api():
-    with open("cache/settings.json") as f:
-        cfg = json.load(f)
-    env = KoreaInvestEnv(cfg)
-    api = KoreaInvestAPI(cfg, env.get_base_headers())
-    return env, api
-
 class KoreaInvestEnv:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.custtype = cfg.get('custtype', 'P')
-        self.api_key = cfg["api_key"]
-        self.api_secret_key = cfg["api_secret_key"]
+        self.custtype = cfg.get('custtype')
+        self.env_keys_list = KoreaInvestEnv.get_env_keys_list()
+        self.api_key = cfg.get("api_key")
+        self.api_secret_key = cfg.get("api_secret_key")
+        self.account_num = cfg.get("account_num")
+        self.using_url = cfg.get("url")
+        self.htsid = cfg.get("htsid")
         self.base_headers = {
             "content_Type": "application/json",
             "Accept": "text/plain",
@@ -66,17 +63,6 @@ class KoreaInvestEnv:
         # 3. 헤더 초기 설정
         self.base_headers["authorization"] = self.access_token
 
-        if self.is_paper_trading:
-            using_url = cfg.get("paper_url", "")
-            api_key = cfg.get("paper_api_key", "")
-            api_secret_key = cfg.get("paper_api_secret_key", "")
-            account_num = cfg.get("paper_stock_account_number", "")
-        else:
-            using_url = cfg.get("url", "")
-            api_key = cfg.get("api_key", "")
-            api_secret_key = cfg.get("api_secret_key", "")
-            account_num = cfg.get("stock_account_number", "")
-
         self.request_base_url = cfg["paper_url"] if self.is_paper_trading else cfg["url"]
         websocket_approval_key = cfg.get("websocket_approval_key")
         if not websocket_approval_key:
@@ -87,10 +73,11 @@ class KoreaInvestEnv:
         self.base_headers["authorization"] = self.access_token
         # Debug: show which token file is selected
         # (already logged above)
-        self.base_headers["appkey"] = api_key
-        self.base_headers["appsecret"] = api_secret_key
-        self.cfg["account_num"] = account_num
-        self.cfg["using_url"] = using_url
+
+    @classmethod
+    def get_env_keys_list(cls):
+        env_vars = dotenv_values('.env')  # 현재 .env 파일에서 키-값을 읽음
+        return list(env_vars.keys())
 
     def get_base_headers(self):
         headers = self.base_headers.copy()
@@ -102,19 +89,15 @@ class KoreaInvestEnv:
         return copy.deepcopy(self.cfg)
 
     def refresh_access_token(self):
-        if DEBUG:
-            logger.info("🔁 토큰 갱신 시작")
-        logger.debug("🛠️ [refresh_access_token] 함수 진입 확인")
-
-        # 토큰 발급 URL
+        #토큰 발급 URL
         if self.is_paper_trading:
-            token_url = self.cfg.get("paper_url", "").rstrip("/") + "/oauth2/tokenP"
-            api_key = self.cfg.get("paper_api_key")
-            api_secret_key = self.cfg.get("paper_api_secret_key")
+            token_url = cfg.get("paper_url") + "/oauth2/tokenP"
+            api_key = cfg.get("paper_api_key")
+            api_secret_key = cfg.get("paper_api_secret_key")
         else:
-            token_url = self.cfg.get("url", "").rstrip("/") + "/oauth2/tokenP"
-            api_key = self.cfg.get("api_key")
-            api_secret_key = self.cfg.get("api_secret_key")
+            token_url = cfg.get("url") + "/oauth2/tokenP"
+            api_key = cfg.get("api_key")
+            api_secret_key = cfg.get("api_secret_key")
 
         payload = {
             "grant_type": "client_credentials",
@@ -133,28 +116,45 @@ class KoreaInvestEnv:
                 logger.error(f"❌ access_token 누락: {data}")
                 raise Exception(f"토큰 갱신 실패: access_token 누락")
 
-            new_token = "Bearer " + data["access_token"]
-
             # 토큰 및 발급시간 갱신
-            self.access_token = new_token
+            self.access_token = data["access_token"]
             self.token_issued_at = int(time.time())
 
             # 헤더 갱신
-            self.base_headers["authorization"] = new_token
+            self.base_headers["authorization"] = self.access_token
 
             # cfg에도 갱신된 토큰과 시간 저장
             if self.is_paper_trading:
-                self.cfg["papertoken"] = new_token
+                self.cfg["papertoken"] = self.access_token
                 self.cfg["papertoken_issued_at"] = self.token_issued_at
             else:
-                self.cfg["realtoken"] = new_token
+                self.cfg["realtoken"] = self.access_token
                 self.cfg["realtoken_issued_at"] = self.token_issued_at
 
             # cfg에도 갱신된 토큰과 시간 저장 후 settings.json 저장
+            # 여기서 덤프되어서 다른 키값들이랑 같이 저장됨
+            # 제외할 키 목록을 명시적으로 정의
+
             try:
+                # 1. 기존 settings.json 불러오기
+                if os.path.exists(SETTINGS_FILE):
+                    with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                        existing_cfg = json.load(f)
+                else:
+                    existing_cfg = {}
+
+                # 2. 변한 키만 필터링해서 추출 (.env 키 제외)
+                changed_cfg = {k: v for k, v in self.cfg.items() if k not in self.env_keys_list}
+
+                # 3. 기존 값에 덮어쓰기
+                existing_cfg.update(changed_cfg)
+
+                # 4. 다시 저장
                 with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(self.cfg, f, ensure_ascii=False, indent=2)
-                logger.debug(f"✅ settings.json 저장 완료: {SETTINGS_FILE}")
+                    json.dump(existing_cfg, f, ensure_ascii=False, indent=2)
+
+                logger.debug(f"✅ settings.json 부분 저장 완료: {SETTINGS_FILE}")
+
             except Exception as e:
                 logger.error(f"❌ settings.json 저장 실패: {e}")
 
@@ -167,27 +167,24 @@ class KoreaInvestEnv:
 
     def get_websocket_approval_key(self):
         logger.debug("[get_websocket_approval_key] 🔁 함수 호출됨")
-        if self.is_paper_trading:
-            appkey = self.cfg["paper_api_key"]
-            secretkey = self.cfg["paper_api_secret_key"]
-            request_base_url = self.cfg["paper_url"]
-        else:
-            appkey = self.cfg["api_key"]
-            secretkey = self.cfg["api_secret_key"]
-            request_base_url = self.cfg["url"]
 
-        request_url = f"{request_base_url}/oauth2/Approval"
+        if self.is_paper_trading:
+            api_key = self.cfg["paper_api_key"]
+            api_secret_key = self.cfg["paper_api_secret_key"]
+            base_url = self.cfg["paper_url"]
+        else:
+            api_key = self.cfg["api_key"]
+            api_secret_key = self.cfg["api_secret_key"]
+            base_url = self.cfg["url"]
+
         headers = {"content-type": "application/json"}
         body = {
             "grant_type": "client_credentials",
-            "appkey": appkey,
-            "secretkey": secretkey
+            "appkey": api_key,
+            "secretkey": api_secret_key
         }
 
-        logger.info(f"🔑 [get_websocket_approval_key] 최종 요청 URL: {request_url}")
-        logger.info(f"🔐 [get_websocket_approval_key] appkey: {appkey}, secretkey: {secretkey}")
-
-        res = requests.post(request_url, headers=headers, data=json.dumps(body))
+        res = requests.post(base_url, headers=headers, data=json.dumps(body))
 
         try:
             data = res.json()
@@ -484,16 +481,16 @@ class KoreaInvestAPI:
         elif cmd == 4:  # 주식체결 등록해제
             tr_id = 'H0STCNT0'
             tr_type = '2'
-        elif cmd == 5:  # 주실체결통보 등록(고객용)
+        elif cmd == 5:  # 주식체결통보 등록(고객용)
             tr_id = 'H0STCNI0' #고객체결통보
             tr_type = '1'
-        elif cmd == 6:  # 주실체결통보 등록해제(고객용)
+        elif cmd == 6:  # 주식체결통보 등록해제(고객용)
             tr_id = 'H0STCNI0'  # 고객체결통보
             tr_type = '2'
-        elif cmd == 7:  # 주실체결통보 등록(모의)
+        elif cmd == 7:  # 주식체결통보 등록(모의)
             tr_id = 'H0STCNI9'  # 테스트용 직원체결통보
             tr_type = '1'
-        elif cmd == 8:  # 주실체결통보 등록해제(모의)
+        elif cmd == 8:  # 주식체결통보 등록해제(모의)
             tr_id = 'H0STCNI9'  # 테스트용 직원체결통보
             tr_type = '2'
 
@@ -891,3 +888,8 @@ class APIResponse:
         if DEBUG: logger.info(f"{self.get_body().rt_cd}, {self.get_error_code()}, {self.get_error_message()}")
         if DEBUG: logger.info(f"---------------------------------")
     # (Method removed: get_order_detail)
+
+
+if __name__ == '__main__':
+    cfg = settings.load_settings()
+    env = KoreaInvestEnv(cfg)

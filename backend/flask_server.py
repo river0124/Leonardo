@@ -12,7 +12,7 @@ import pandas as pd
 from cryptography.fernet import Fernet
 from settings import cfg
 
-load_dotenv(dotenv_path='.env.local')  # .env.local 파일에서 환경변수 로드
+load_dotenv()  # .env.local 파일에서 환경변수 로드
 
 from get_asset import get_total_asset
 from get_candle_data import get_candle_chart_data
@@ -56,11 +56,8 @@ execution_queue = asyncio.Queue()
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-
 # 디버깅 모드 설정
 DEBUG = cfg.get("DEBUG", "False").lower() == "true"
-if DEBUG:
-    logger.info("🐞 cfg 로딩 완료: {}", cfg)
 
 logger.remove()
 logger.add(sys.stderr, level="DEBUG" if DEBUG else "WARNING")
@@ -477,7 +474,6 @@ def buy_stock():
         if DEBUG:
             logger.debug(f"[BUY API] 주문 요청 데이터: {json.dumps(order, ensure_ascii=False)}")
 
-
         asyncio.run_coroutine_threadsafe(
             execution_queue.put({
                 "type": "buy",
@@ -521,6 +517,9 @@ if __name__ == '__main__':
     loop.create_task(trade_manager.process_execution_queue())
 
     threading.Thread(target=loop.run_forever, daemon=True).start()
-    app.run(debug=True, use_reloader=False)
 
-    # app.run(host="0.0.0.0", port=5000, debug=True)
+    if APP_ENV == "local":
+        app.run(debug=True, use_reloader=False)
+    else:
+        # 서버 환경에서는 0.0.0.0 바인딩, 포트 5000, 디버그 끔
+        app.run(host="0.0.0.0", port=5000, debug=False)
