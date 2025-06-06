@@ -225,14 +225,14 @@ class TradeManager:
 
     async def handle_execution_notice_message(self, message: dict):
         """
-        📡 WebSocket 체결 메시지를 처리하여 내부 로직으로 전달하는 함수
-        - message: 실시간 체결 메시지 (dict 형태)
+        - WebSocket 체결통보 메시지를 처리하여 내부 로직으로 전달하는 함수
+        - message: 실시간 체결통보 메시지 (dict 형태)
         기능:
         - 체결 메시지에서 필요한 변수 추출
         - 체결여부가 2일 경우에만 handle_execution() 호출
         """
 
-        if DEBUG: logger.info(f"리스너 진입!!!!!")
+        if DEBUG: logger.info(f"체결 통보 리스너 진입!!!!!")
         try:
             order_no = message.get("주문번호")
             stock_code = message.get("종목코드")
@@ -254,6 +254,46 @@ class TradeManager:
                 return
 
             await self.handle_execution(order_no, stock_code, qty_filled, execution_price, execution_status)
+        except Exception as e:
+            if DEBUG: logger.error(f"❌ 실시간 체결 메시지 처리 중 오류 발생: {e}")
+
+    async def handle_hoga_message(self, message: dict):
+        # 실시간 종목별 호가 메시지 리스너
+        if DEBUG: logger.info(f"호가 리스너 진입!!!!!")
+        # try:
+        #     stock_code = message.get("종목코드")
+        #     execution_time = message.get("체결시간")
+        #     current_price = message.get("현재가")
+        #     ask1 = message.get("매도호가1")
+        #     bid1 = message.get("매수호가1")
+        #
+        #     if DEBUG: logger.info(f"""
+        #     [WS 체결 메시지 수신]
+        #     ▶ 종목코드: {stock_code} ▶ 체결시간: {execution_time} ▶ 현재가: {current_price}
+        #     ▶ 매도호가1: {ask1} ▶ 매수호가1: {bid1}
+        #     """)
+        #
+        #     await self.handle_execution(stock_code, execution_time, current_price, ask1, bid1)
+        # except Exception as e:
+        #     if DEBUG: logger.error(f"❌ 실시간 체결 메시지 처리 중 오류 발생: {e}")
+
+    async def handle_execution_list_message(self, message: dict):
+        # 실시간 종목별 체결 메시지 리스너
+        if DEBUG: logger.info(f"체결 리스너 진입!!!!!")
+        try:
+            stock_code = message.get("종목코드")
+            execution_time = message.get("체결시간")
+            current_price = message.get("현재가")
+            ask1 = message.get("매도호가1")
+            bid1 = message.get("매수호가1")
+
+            if DEBUG: logger.info(f"""
+                    [WS 체결 메시지 수신]
+                    ▶ 종목코드: {stock_code} ▶ 체결시간: {execution_time} ▶ 현재가: {current_price}
+                    ▶ 매도호가1: {ask1} ▶ 매수호가1: {bid1}
+                    """)
+
+            await self.handle_execution(stock_code, execution_time, current_price, ask1, bid1)
         except Exception as e:
             if DEBUG: logger.error(f"❌ 실시간 체결 메시지 처리 중 오류 발생: {e}")
 

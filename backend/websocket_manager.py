@@ -130,9 +130,9 @@ class Websocket_Manager:
                 }))
             except Exception as e:
                 if DEBUG:
-                    logger.error(f"❌ 리스너에 체결정보 전달 중 오류: {e}")
+                    logger.error(f"❌ 리스너에 체결통보 정보 전달 중 오류: {e}")
 
-    def receive_realtime_hoga_domestic(data):
+    async def receive_realtime_hoga_domestic(self, data):
         """
         상세 메뉴는 아래의 링크 참조
         https://github.com/koreainvestment/open-trading-api/blob/main/websocket/python/ws_domestic_overseas_all.py
@@ -146,9 +146,22 @@ class Websocket_Manager:
             data_dict[f"매수{i}호가수량"] = values[i + 32]
             data_dict[f"매도{i}호가"] = values[2 + i]
             data_dict[f"매도{i}호가수량"] = values[22 + i]
+
+        print(data_dict)
+
+        if self.listener:
+            try:
+                asyncio.create_task(self.listener.handle_hoga_message(data_dict))
+            except Exception as e:
+                if DEBUG:
+                    logger.error(f"❌ 리스너에 호가정보 전달 중 오류: {e}")
+
+        if DEBUG:
+            logger.info(f"주식 호가 데이터: {data_dict}")
+
         return data_dict
 
-    def receive_realtime_tick_domestic(data):
+    async def receive_realtime_tick_domestic(self, data):
         """
         메뉴 순서는 다음과 같음 '|'으로 분리해서 아래와 같이 하나씩 접근하면 죕니다.
         유가증권단축종목코드|주식체결시간|주식현재가|전일대비부호|전일대비|전일대비율|가중평균주식가격|주식시가|주식최고가|주식최저가|
@@ -158,14 +171,27 @@ class Websocket_Manager:
         시간구분코드|임의종료구분코드|정적VI발동기준가
         """
         values = data.split('^')
-        종목코드 = values[0]
-        체결시간 = values[1]
-        현재가 = int(values[2])
-        return dict(
-            종목코드=종목코드,
-            체결시간=체결시간,
-            현재가=현재가,
-        )
+        data_dict = dict()
+
+        data_dict["종목코드"] = values[0]
+        data_dict["체결시간"] = values[1]
+        data_dict["현재가"] = int(values[2])
+        data_dict["매도호가1"] = int(values[10])
+        data_dict["매수호가1"] = int(values[11])
+
+        print(data_dict)
+
+        if self.listener:
+            try:
+                asyncio.create_task(self.listener.handle_execution_list_message(data_dict))
+            except Exception as e:
+                if DEBUG:
+                    logger.error(f"❌ 리스너에 체결정보 전달 중 오류: {e}")
+
+        if DEBUG:
+            logger.info(f"주식 호가 데이터: {data_dict}")
+
+        return data_dict
 
     async def websocket_listen_init(self, korea_invest_api, url, cmd, stock_code):
         running_account_num = korea_invest_api.account_num
@@ -197,10 +223,10 @@ class Websocket_Manager:
                     if trid0 == "H0STCNT0":  # 주식 체결 데이터 처리
                         data_cnt = int(recvstr[2])  # 체결데이터 개수
                         for cnt in range(data_cnt):
-                            data_dict = self.receive_realtime_tick_domestic(recvstr[3])
+                            data_dict = await self.receive_realtime_tick_domestic(recvstr[3])
                             logger.info(f"주식 체결 데이터: {data_dict}")
                     elif trid0 == "H0STASP0":  # 주식호가 데이터 처리
-                        data_dict = self.receive_realtime_hoga_domestic(recvstr[3])
+                        data_dict = await self.receive_realtime_hoga_domestic(recvstr[3])
                         logger.info(f"주식 호가 데이터: {data_dict}")
 
                     else:
