@@ -3,6 +3,7 @@ from loguru import logger
 import os
 import json
 import dotenv
+
 from settings import cfg
 from slack_notifier import post_to_slack
 import time
@@ -234,6 +235,7 @@ class TradeManager:
 
         if DEBUG: logger.info(f"체결 통보 리스너 진입!!!!!")
         try:
+            message_type = message.get("메시지타입")
             order_no = message.get("주문번호")
             stock_code = message.get("종목코드")
             stock_name = message.get("종목명")
@@ -245,6 +247,7 @@ class TradeManager:
 
             if DEBUG: logger.info(f"""
             [WS 체결 메시지 수신]
+            ▶ 메시지타입: {message_type}
             ▶ 주문번호: {order_no} ▶ 종목코드: {stock_code} ▶ 종목명: {stock_name} ▶ 체결수량: {qty_filled}
             ▶ 체결가격: {execution_price} ▶ 시간: {execution_time} ▶ 주문구분: {order_type} ▶ 체결여부: {execution_status}
             """)
@@ -259,28 +262,52 @@ class TradeManager:
 
     async def handle_hoga_message(self, message: dict):
         # 실시간 종목별 호가 메시지 리스너
-        if DEBUG: logger.info(f"호가 리스너 진입!!!!!")
-        # try:
-        #     stock_code = message.get("종목코드")
-        #     execution_time = message.get("체결시간")
-        #     current_price = message.get("현재가")
-        #     ask1 = message.get("매도호가1")
-        #     bid1 = message.get("매수호가1")
-        #
-        #     if DEBUG: logger.info(f"""
-        #     [WS 체결 메시지 수신]
-        #     ▶ 종목코드: {stock_code} ▶ 체결시간: {execution_time} ▶ 현재가: {current_price}
-        #     ▶ 매도호가1: {ask1} ▶ 매수호가1: {bid1}
-        #     """)
-        #
-        #     await self.handle_execution(stock_code, execution_time, current_price, ask1, bid1)
-        # except Exception as e:
-        #     if DEBUG: logger.error(f"❌ 실시간 체결 메시지 처리 중 오류 발생: {e}")
+        if DEBUG:
+            logger.info("종목별 호가 리스너 진입!!!!!")
+
+        try:
+            message_type = message.get("message_type")
+            stock_code = message.get("종목코드")
+
+            # 매수 호가, 잔량 리스트 생성
+            ask_prices = [message.get(f"매수{i}호가") for i in range(1, 11)]
+            ask_remains = [message.get(f"매수{i}호가잔량") for i in range(1, 11)]
+
+            # 매도 호가, 잔량 리스트 생성
+            bid_prices = [message.get(f"매도{i}호가") for i in range(1, 11)]
+            bid_remains = [message.get(f"매도{i}호가잔량") for i in range(1, 11)]
+
+            execution_time = message.get("체결시간")
+            current_price = message.get("현재가")
+
+            # 가장 첫 번째 매도, 매수 호가
+            ask1 = ask_prices[0] if ask_prices else None
+            bid1 = bid_prices[0] if bid_prices else None
+
+            if DEBUG:
+                logger.info(f"""
+                [WS 체결 메시지 수신]
+                ▶ 메시지타입: {message_type}
+                ▶ 종목코드: {stock_code} ▶ 체결시간: {execution_time} ▶ 현재가: {current_price}
+                ▶ 매도호가1: {ask1} ▶ 매수호가1: {bid1}
+                """)
+
+            # handle_execution 함수에 필요한 파라미터 넘기기 (필요에 맞게 조정)
+            await self.handle_execution(
+                message_type, stock_code,
+                *ask_prices, *ask_remains,
+                *bid_prices, *bid_remains,
+                execution_time, current_price
+            )
+        except Exception as e:
+            if DEBUG:
+                logger.error(f"❌ 실시간 체결 메시지 처리 중 오류 발생: {e}")
 
     async def handle_execution_list_message(self, message: dict):
         # 실시간 종목별 체결 메시지 리스너
-        if DEBUG: logger.info(f"체결 리스너 진입!!!!!")
+        if DEBUG: logger.info(f"종목별 체결 리스너 진입!!!!!")
         try:
+            message_type = message.get("message_type")
             stock_code = message.get("종목코드")
             execution_time = message.get("체결시간")
             current_price = message.get("현재가")
@@ -289,7 +316,7 @@ class TradeManager:
 
             if DEBUG: logger.info(f"""
                     [WS 체결 메시지 수신]
-                    ▶ 종목코드: {stock_code} ▶ 체결시간: {execution_time} ▶ 현재가: {current_price}
+                    ▶ 메시지타입: {message_type} ▶ 종목코드: {stock_code} ▶ 현재가: {current_price} ▶ 체결시간: {execution_time} 
                     ▶ 매도호가1: {ask1} ▶ 매수호가1: {bid1}
                     """)
 

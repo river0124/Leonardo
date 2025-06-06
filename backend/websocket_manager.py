@@ -118,6 +118,7 @@ class Websocket_Manager:
         if hasattr(self, "listener") and self.listener:
             try:
                 asyncio.create_task(self.listener.handle_execution_notice_message({
+                    "메시지타입": "체결통보",
                     "종목코드": 종목코드,
                     "종목명": 종목명,
                     "체결수량": 체결수량,
@@ -140,12 +141,13 @@ class Websocket_Manager:
 
         values = data.split('^')  # 수신데이터를 split '^'
         data_dict = dict()
+        data_dict["message_type"] = "종목별호가"
         data_dict["종목코드"] = values[0]
         for i in range(1, 11):
             data_dict[f"매수{i}호가"] = values[i + 12]
-            data_dict[f"매수{i}호가수량"] = values[i + 32]
+            data_dict[f"매수{i}호가잔량"] = values[i + 32]
             data_dict[f"매도{i}호가"] = values[2 + i]
-            data_dict[f"매도{i}호가수량"] = values[22 + i]
+            data_dict[f"매도{i}호가잔량"] = values[22 + i]
 
         print(data_dict)
 
@@ -173,6 +175,7 @@ class Websocket_Manager:
         values = data.split('^')
         data_dict = dict()
 
+        data_dict["message_type"] = "종목별체결"
         data_dict["종목코드"] = values[0]
         data_dict["체결시간"] = values[1]
         data_dict["현재가"] = int(values[2])
