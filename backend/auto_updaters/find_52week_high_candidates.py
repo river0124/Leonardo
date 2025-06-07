@@ -1,7 +1,6 @@
 import os, sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from slack_notifier import post_to_slack  # ✅ 슬랙 전송 모듈
-from get_total_data_for_candidates import get_foreign_institution_trend,get_foreign_net_trend
 from utils import KoreaInvestAPI, KoreaInvestEnv
 from settings import cfg
 

@@ -4,20 +4,12 @@ from loguru import logger
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_PATH = os.path.abspath(os.path.join(BASE_DIR, '..', '.env'))  # 두 폴더 위로 변경
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
-# 환경 변수 APP_ENV에 따라 환경 분리(local, server)
-APP_ENV = os.getenv("APP_ENV", "local").lower()
-
-# 기본 경로 분리
-if APP_ENV == "server":
-    BASE_DIR = "/home/ubuntu/backend"
-    DEBUG = False
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DEBUG = True
-
-CACHE_DIR = os.path.join(BASE_DIR, "cache")
+# 환경변수에서 경로 읽기, 없으면 기본값으로 로컬 경로 지정
+CACHE_DIR = os.getenv('CACHE_DIR')
 SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
 FERNET_KEY_FILE = os.path.join(CACHE_DIR, "key.secret")
 

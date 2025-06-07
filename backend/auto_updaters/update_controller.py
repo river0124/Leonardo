@@ -1,26 +1,28 @@
-import os
+import os, sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from slack_notifier import post_to_slack  # ✅ 슬랙 전송 모듈
+
 from dotenv import load_dotenv
 import subprocess
 from pathlib import Path
-import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from slack_notifier import post_to_slack
 
-# .env 파일 로드
-load_dotenv()
-PYTHON_EXECUTABLE = os.getenv("PYTHON_EXECUTABLE", "/usr/bin/python3")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_PATH = os.path.abspath(os.path.join(BASE_DIR, '..', '.env'))  # 두 폴더 위로 변경
+load_dotenv(dotenv_path=ENV_PATH, override=True)
+PYTHON_EXECUTABLE = os.getenv("PYTHON_EXECUTABLE") or sys.executable
+CACHE_DIR = os.getenv("CACHE_DIR", os.path.join(BASE_DIR, "cache"))
 
 scripts = [
-    "/Users/hyungseoklee/Documents/Leonardo/backend/auto_updaters/update_stock_names.py",
-    "/Users/hyungseoklee/Documents/Leonardo/backend/auto_updaters/fill_sector_from_fnguide.py",
-    "/Users/hyungseoklee/Documents/Leonardo/backend/auto_updaters/sector_utils.py",
-    "/Users/hyungseoklee/Documents/Leonardo/backend/auto_updaters/find_52week_high_candidates.py",
+    os.path.join(BASE_DIR, "update_stock_names.py"),
+    os.path.join(BASE_DIR, "fill_sector_from_fnguide.py"),
+    os.path.join(BASE_DIR, "sector_utils.py"),
+    os.path.join(BASE_DIR, "find_52week_high_candidates.py"),
 ]
 
 def run_scripts_sequentially():
     for script in scripts:
         print(f"⏳ 실행 중: {Path(script).name}")
-        result = subprocess.run([PYTHON_EXECUTABLE, script])
+        result = subprocess.run([sys.executable, script])
         if result.returncode != 0:
             print(f"❌ 오류 발생: {Path(script).name} 실행 중단")
             break
