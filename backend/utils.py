@@ -36,7 +36,7 @@ class KoreaInvestEnv:
         self.using_url = cfg.get("url")
         self.htsid = cfg.get("htsid")
         self.base_headers = {
-            "content_Type": "application/json",
+            "content_Type": "application/json; charset=utf-8",
             "Accept": "text/plain",
             "charset": "UTF-8",
             "User_Agent": cfg.get("my_agent", "")
@@ -117,7 +117,8 @@ class KoreaInvestEnv:
                 raise Exception(f"토큰 갱신 실패: access_token 누락")
 
             # 토큰 및 발급시간 갱신
-            self.access_token = data["access_token"]
+            self.access_token = "Bearer " + data["access_token"]
+            print(self.access_token)
             self.token_issued_at = int(time.time())
 
             # 헤더 갱신
@@ -361,10 +362,16 @@ class KoreaInvestAPI:
                     tr_id = "V" + tr_id[1:]
             headers["tr_id"] = tr_id
             headers["custtype"] = self.custtype
+
+            if DEBUG:
+                logger.debug(f"📡 요청 URL: {url}")
+                logger.debug(f"📩 요청 Headers: {headers}")
+                logger.debug(f"📦 요청 Params: {params}")
             if is_post_request:
                 if use_hash:
                     self.set_order_hash_key(headers, params)
                 res = requests.post(url, headers=headers, data=json.dumps(params))
+                print(res)
             else:
                 res = requests.get(url, headers=headers, params=params)
 
@@ -414,52 +421,66 @@ class KoreaInvestAPI:
                 time.sleep(0.02)
 
     def get_current_price(self, stock_no):
-        url = "/uapi/domestic-stock/v1/quotations/inquire-price"
+
+        url = self.using_url + "/uapi/domestic-stock/v1/quotations/inquire-price"
         tr_id = "FHKST01010100"
+
+        headers = {
+            "content-type": "application/json; charset=utf-8",
+            "authorization": self.cfg["realtoken"],
+            "appkey": self.cfg["api_key"],
+            "appsecret": self.cfg["api_secret_key"],
+            "tr_id": tr_id,
+            "custtype": "P",
+        }
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
             "FID_INPUT_ISCD": stock_no
         }
-        t1 = self._url_fetch(url, tr_id, params)
-        if t1 and t1.is_ok():
-            # 📦 필수 주가 정보 필드 추출 및 통일된 구조 생성
-            data = t1.get_body().output
-            # 추출할 주요 필드와 한글 설명 (Korean inline comments)
-            fields_to_extract = {
-                "stck_prpr": "현재가",  # 주식의 현재 거래 가격
-                "w52_hgpr": "52주 최고가",  # 최근 52주간의 최고 가격
-                "w52_hgpr_date": "52주 최고가 일자",  # 52주 최고가가 기록된 날짜
-                "w52_lwpr": "52주 최저가",  # 최근 52주간의 최저 가격
-                "w52_lwpr_date": "52주 최저가 일자",  # 52주 최저가가 기록된 날짜
-                "w52_hgpr_vrss_prpr_ctrt": "52주 최고가 대비 현재가 대비",  # 현재가: "52주일 최고가 대비 현재가 대비:"
-                "w52_lwpr_vrss_prpr_ctrt": "52주 최저가 대비 현재가 대비",  # 현재가: "52주일 최저가 대비 현재가 대비:"
-                "acml_vol": "누적거래량",  # 당일 총 거래량
-                "stck_oprc": "시가",  # 당일 첫 거래 가격
-                "prdy_vrss": "전일대비",  # 전일 종가 대비 절대 변화량
-                "prdy_vrss_sign": "전일대비부호",  # 전일 대비 상승/하락/보합 부호
-                "prdy_ctrt": "전일 대비율",  # 전일 종가 대비 등락률(%)
-                "stck_hgpr": "주식 최고가",  # 당일 최고 가격
-                "stck_lwpr": "주식 최저가",  # 당일 최저 가격
-                "stck_mxpr": "주식 상한가",  # 상한가 제한 가격
-                "stck_llam": "주식 하한가",  # 하한가 제한 가격
-                "stck_sdpr": "주식 기준가",  # 기준 가격 (보통 전일 종가)
-                "d250_hgpr": "250일 최고가",  # 최근 250일 간 최고가
-                "d250_hgpr_date": "250일 최고가 일자",  # 250일 최고가 기록일
-                "d250_hgpr_vrss_prpr_rate": "250일 최고가 대비 현재가 비율",  # 현재가가 250일 최고가 대비 몇 %인지
-                "d250_lwpr": "250일 최저가",  # 최근 250일 간 최저가
-                "d250_lwpr_date": "250일 최저가 일자",  # 250일 최저가 기록일
-                "d250_lwpr_vrss_prpr_rate": "250일 최저가 대비 현재가 비율",  # 현재가가 250일 최저가 대비 몇 %인지
-            }
-            stock_info = {k: data.get(k) for k in fields_to_extract}
-            # 기존의 52주/250일 대비율 필드(혹시 추가 필드 필요시 아래처럼 유지)
-            stock_info["w52_hgpr_vrss_prpr_ctrt"] = data.get("w52_hgpr_vrss_prpr_ctrt")
-            stock_info["w52_lwpr_vrss_prpr_ctrt"] = data.get("w52_lwpr_vrss_prpr_ctrt")
-            return stock_info
-        elif t1 is None:
-            return dict()
-        else:
-            t1.print_error()
-            return dict()
+
+        response = requests.get(url, headers=headers, params=params)
+
+        return response
+        # t1 = self._url_fetch(url, tr_id, params)
+        # if t1 and t1.is_ok():
+        #     # 📦 필수 주가 정보 필드 추출 및 통일된 구조 생성
+        #     data = t1.get_body().output
+        #     # 추출할 주요 필드와 한글 설명 (Korean inline comments)
+        #     fields_to_extract = {
+        #         "stck_prpr": "현재가",  # 주식의 현재 거래 가격
+        #         "w52_hgpr": "52주 최고가",  # 최근 52주간의 최고 가격
+        #         "w52_hgpr_date": "52주 최고가 일자",  # 52주 최고가가 기록된 날짜
+        #         "w52_lwpr": "52주 최저가",  # 최근 52주간의 최저 가격
+        #         "w52_lwpr_date": "52주 최저가 일자",  # 52주 최저가가 기록된 날짜
+        #         "w52_hgpr_vrss_prpr_ctrt": "52주 최고가 대비 현재가 대비",  # 현재가: "52주일 최고가 대비 현재가 대비:"
+        #         "w52_lwpr_vrss_prpr_ctrt": "52주 최저가 대비 현재가 대비",  # 현재가: "52주일 최저가 대비 현재가 대비:"
+        #         "acml_vol": "누적거래량",  # 당일 총 거래량
+        #         "stck_oprc": "시가",  # 당일 첫 거래 가격
+        #         "prdy_vrss": "전일대비",  # 전일 종가 대비 절대 변화량
+        #         "prdy_vrss_sign": "전일대비부호",  # 전일 대비 상승/하락/보합 부호
+        #         "prdy_ctrt": "전일 대비율",  # 전일 종가 대비 등락률(%)
+        #         "stck_hgpr": "주식 최고가",  # 당일 최고 가격
+        #         "stck_lwpr": "주식 최저가",  # 당일 최저 가격
+        #         "stck_mxpr": "주식 상한가",  # 상한가 제한 가격
+        #         "stck_llam": "주식 하한가",  # 하한가 제한 가격
+        #         "stck_sdpr": "주식 기준가",  # 기준 가격 (보통 전일 종가)
+        #         "d250_hgpr": "250일 최고가",  # 최근 250일 간 최고가
+        #         "d250_hgpr_date": "250일 최고가 일자",  # 250일 최고가 기록일
+        #         "d250_hgpr_vrss_prpr_rate": "250일 최고가 대비 현재가 비율",  # 현재가가 250일 최고가 대비 몇 %인지
+        #         "d250_lwpr": "250일 최저가",  # 최근 250일 간 최저가
+        #         "d250_lwpr_date": "250일 최저가 일자",  # 250일 최저가 기록일
+        #         "d250_lwpr_vrss_prpr_rate": "250일 최저가 대비 현재가 비율",  # 현재가가 250일 최저가 대비 몇 %인지
+        #     }
+        #     stock_info = {k: data.get(k) for k in fields_to_extract}
+        #     # 기존의 52주/250일 대비율 필드(혹시 추가 필드 필요시 아래처럼 유지)
+        #     stock_info["w52_hgpr_vrss_prpr_ctrt"] = data.get("w52_hgpr_vrss_prpr_ctrt")
+        #     stock_info["w52_lwpr_vrss_prpr_ctrt"] = data.get("w52_lwpr_vrss_prpr_ctrt")
+        #     return stock_info
+        # elif t1 is None:
+        #     return dict()
+        # else:
+        #     t1.print_error()
+        #     return dict()
 
     def get_send_data(self, cmd=None, stock_code=None):
         # 1. 주식호가, 2.주식호가해제, 3.주식체결, 4.주식체결해제, 5.주식체결통보(고객), 6.주식체결통보해제(고객), 7.주식체결통보(모의), 8.주식체결통보해제(모의)
@@ -635,6 +656,8 @@ class KoreaInvestAPI:
 
             data = response.json()
             new_token = "Bearer " + data.get("access_token", "")
+            if DEBUG:
+                logger.debug(f"🪪 갱신된 토큰 (Bearer 포함 여부 확인): {new_token}")
             if not new_token.strip():
                 raise Exception(f"토큰 갱신 실패: access_token 누락 - {data}")
 
@@ -693,6 +716,27 @@ class KoreaInvestAPI:
         }
         params = {
             "MKSC_SHRN_ISCD": stock_code
+        }
+
+        response = requests.get(url, headers=headers, params=params)
+
+        return response
+
+    def get_current_price_and_investor(self, stock_code):
+        url = self.using_url + "/uapi/domestic-stock/v1/quotations/inquire-investor"
+        tr_id = "FHKST01010900" if self.is_paper_trading else "FHKST01010900"
+
+        headers = {
+            "content-type": "application/json; charset=utf-8",
+            "authorization": self.cfg["realtoken"],
+            "appkey": self.cfg["api_key"],
+            "appsecret": self.cfg["api_secret_key"],
+            "tr_id": tr_id,
+            "custtype": "P",
+        }
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": stock_code
         }
 
         response = requests.get(url, headers=headers, params=params)

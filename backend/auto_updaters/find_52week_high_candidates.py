@@ -1,8 +1,25 @@
-CACHE_DIR = "/Users/hyungseoklee/Documents/Leonardo/backend/cache"
+import os, sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from slack_notifier import post_to_slack  # ✅ 슬랙 전송 모듈
+from get_total_data_for_candidates import get_foreign_institution_trend,get_foreign_net_trend
+from utils import KoreaInvestAPI, KoreaInvestEnv
+from settings import cfg
 
+from dotenv import load_dotenv
 from loguru import logger
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_PATH = os.path.abspath(os.path.join(BASE_DIR, '..', '.env'))  # 두 폴더 위로 변경
+load_dotenv(dotenv_path=ENV_PATH, override=True)
+
+# 환경변수에서 경로 읽기, 없으면 기본값으로 로컬 경로 지정
+CACHE_DIR = os.getenv('CACHE_DIR')
+
+HOLIDAY_PATH = os.path.join(CACHE_DIR, 'holidays.csv')
+STOCK_LIST_PATH = os.path.join(CACHE_DIR, 'stock_list.csv')
+
 import json
-import FinanceDataReader as fdr # 이놈은 쓰면 안되겠다 데이터가 정확하지 않아.
+import FinanceDataReader as fdr
 import pandas as pd
 from tqdm import tqdm
 import numpy as np
@@ -10,12 +27,9 @@ import sys, os
 from datetime import datetime, timedelta
 import time
 from FinanceDataReader import DataReader
+from datetime import time as dt_time
 from typing import List
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from get_total_data_for_candidates import get_foreign_institution_trend,get_foreign_net_trend
-from utils import KoreaInvestAPI, KoreaInvestEnv
-from settings import cfg
-from slack_notifier import post_to_slack
 
 
 # 📌 강세 섹터 판단 기준 설정
@@ -25,6 +39,8 @@ MIN_RATIO_TO_HIGH52 = 0.90  # 신고가 대비 최소 근접 비율 (예: 0.98 =
 MAX_RATIO_DIFF_FROM_HIGH52 = 0.1  # 52주 신고가에서 이 비율 이상 벗어난 종목은 제외 (예: 0.10 → 10%)
 
 # Load DEBUG setting
+
+print(f"{CACHE_DIR}/settings.json")
 with open(f"{CACHE_DIR}/settings.json") as f:
     settings = json.load(f)
 DEBUG = settings.get("DEBUG", "False") == "True"
@@ -281,31 +297,58 @@ def score_strong_sector(df_result, strong_sector1, strong_sector2):
     df_result = df_result.sort_values(by='SectorScore', ascending=False)
     return df_result
 
+
 def get_foreign_institution_trend(stock_code):
+    today = datetime.today().date()
+    now = datetime.now().time()
+    is_holiday = today in holiday_dates
+    is_weekend = today.weekday() >= 5
+    is_market_open = not (is_weekend or is_holiday)
     original_mode = settings.get("is_paper_trading", True)
 
     if original_mode:
         cfg["is_paper_trading"] = False
     else:
-        # logger.info("현재는 실전투자 상태입니다.")
-        pass
+        logger.info("현재 실전투자 모드입니다.")
 
-    env = KoreaInvestEnv(cfg)
-    api = KoreaInvestAPI(cfg, env.get_base_headers())
+    if is_market_open and dt_time(9, 0) <= now <= dt_time(15, 30):
+        # ✅ 장중
 
-    response = api.summarize_foreign_institution_estimates(stock_code)
-    response_json = response.json()
-    output2 = response_json.get("output2", [])
+        env = KoreaInvestEnv(cfg)
+        api = KoreaInvestAPI(cfg, env.get_base_headers())
 
-    if output2:
-        # 시간대 기준으로 내림차순 정렬
-        latest = max(output2, key=lambda x: int(x["bsop_hour_gb"]))
-        frgn = int(latest["frgn_fake_ntby_qty"])
-        orgn = int(latest["orgn_fake_ntby_qty"])
+        response = api.summarize_foreign_institution_estimates(stock_code)
+        response_json = response.json()
+        output2 = response_json.get("output2", [])
 
-        return {"외국인": frgn, "기관": orgn}
+        if original_mode:
+            cfg["is_paper_trading"] = True
+
+        if output2:
+            latest = max(output2, key=lambda x: int(x["bsop_hour_gb"]))
+            frgn = int(latest["frgn_fake_ntby_qty"])
+            orgn = int(latest["orgn_fake_ntby_qty"])
+            return {"외국인": frgn, "기관": orgn}
+        else:
+            return {"외국인": 0, "기관": 0}
     else:
-        return {"외국인": 0, "기관": 0}
+        # ✅ 장 종료 후 또는 휴일
+        env = KoreaInvestEnv(cfg)
+        api = KoreaInvestAPI(cfg, env.get_base_headers())
+
+        response = api.get_current_price_and_investor(stock_code)
+        output = response.json()
+
+        if original_mode:
+            cfg["is_paper_trading"] = True
+
+        if output:
+            frgn = int(output['output'][0]['frgn_ntby_qty'])
+            orgn = int(output['output'][0]['orgn_ntby_qty'])
+            return {"외국인": frgn, "기관": orgn}
+        else:
+            return {"외국인": 0, "기관": 0}
+
 
 def get_foreign_net_trend(stock_code):
     original_mode = settings.get("is_paper_trading", True)
@@ -313,8 +356,7 @@ def get_foreign_net_trend(stock_code):
     if original_mode:
         cfg["is_paper_trading"] = False
     else:
-        # logger.info("현재는 실전투자 상태입니다.")
-        pass
+        logger.info("현재 실전투자 모드입니다.")
 
     env = KoreaInvestEnv(cfg)
     api = KoreaInvestAPI(cfg, env.get_base_headers())
@@ -322,6 +364,10 @@ def get_foreign_net_trend(stock_code):
     response = api.summarize_foreign_net_estimates(stock_code)
     response_json = response.json()
     output = response_json.get("output", [])
+
+    if original_mode:
+        cfg["is_paper_trading"] = True
+        # logger.info("🔁 '모의투자 모드로 복원되었습니다.")
 
     if output:
         # 시간대 기준으로 내림차순 정렬
@@ -336,10 +382,8 @@ def get_total_trading_data(stock_code):
     api = KoreaInvestAPI(cfg, env.get_base_headers())
 
     response = api.get_current_price(stock_code)
-    output = response["output"][0] if isinstance(response.get("output"), list) else response
-
-    # 누적거래량 추출 및 매핑
-    acml_vol = output.get("acml_vol")
+    response_json = response.json()
+    acml_vol = response_json.get("output", {}).get("acml_vol")
 
     try:
         return {"누적거래량": int(acml_vol)} if acml_vol is not None else {"누적거래량": 0}

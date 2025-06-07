@@ -3,7 +3,6 @@ from loguru import logger
 import os
 import json
 import dotenv
-
 from settings import cfg
 from slack_notifier import post_to_slack
 import time
@@ -246,7 +245,7 @@ class TradeManager:
             execution_status = message.get("체결여부")
 
             if DEBUG: logger.info(f"""
-            [WS 체결 메시지 수신]
+            [리스너 체결 메시지 수신]
             ▶ 메시지타입: {message_type}
             ▶ 주문번호: {order_no} ▶ 종목코드: {stock_code} ▶ 종목명: {stock_name} ▶ 체결수량: {qty_filled}
             ▶ 체결가격: {execution_price} ▶ 시간: {execution_time} ▶ 주문구분: {order_type} ▶ 체결여부: {execution_status}
@@ -286,7 +285,7 @@ class TradeManager:
 
             if DEBUG:
                 logger.info(f"""
-                [WS 체결 메시지 수신]
+                [리스너 체결 메시지 수신]
                 ▶ 메시지타입: {message_type}
                 ▶ 종목코드: {stock_code} ▶ 체결시간: {execution_time} ▶ 현재가: {current_price}
                 ▶ 매도호가1: {ask1} ▶ 매수호가1: {bid1}
@@ -315,7 +314,7 @@ class TradeManager:
             bid1 = message.get("매수호가1")
 
             if DEBUG: logger.info(f"""
-                    [WS 체결 메시지 수신]
+                    [리스너 체결 메시지 수신]
                     ▶ 메시지타입: {message_type} ▶ 종목코드: {stock_code} ▶ 현재가: {current_price} ▶ 체결시간: {execution_time} 
                     ▶ 매도호가1: {ask1} ▶ 매수호가1: {bid1}
                     """)

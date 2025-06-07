@@ -11,9 +11,6 @@ from dotenv import load_dotenv
 import pandas as pd
 from cryptography.fernet import Fernet
 from settings import cfg
-
-load_dotenv()  # .env.local 파일에서 환경변수 로드
-
 from get_asset import get_total_asset
 from get_candle_data import get_candle_chart_data
 from watchlist_store import load_watchlist, add_code_to_watchlist, remove_code_from_watchlist
@@ -22,6 +19,8 @@ from stock_name_finder import get_stock_name_by_code
 from trade_manager import TradeManager
 from settings import load_settings, save_settings
 from loguru import logger
+
+load_dotenv()  # .env.local 파일에서 환경변수 로드
 
 # --- 경로 설정 ---
 APP_ENV = os.getenv('APP_ENV', 'local')

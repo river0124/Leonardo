@@ -1,26 +1,34 @@
-import FinanceDataReader as fdr
 import os, sys
-from pykrx import stock  # ✅ pykrx 사용
-import pandas as pd
-import datetime
-from pykrx.stock import get_nearest_business_day_in_a_week
-from tqdm import tqdm
-from loguru import logger
-from dotenv import load_dotenv
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from slack_notifier import post_to_slack  # ✅ 슬랙 전송 모듈
 
+from dotenv import load_dotenv
+from loguru import logger
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ENV_PATH = os.path.join(BASE_DIR, '..', '.env')
-# .env 파일 로드
-load_dotenv()
+ENV_PATH = os.path.abspath(os.path.join(BASE_DIR, '..', '.env'))  # 두 폴더 위로 변경
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 # 환경변수에서 경로 읽기, 없으면 기본값으로 로컬 경로 지정
 CACHE_DIR = os.getenv('CACHE_DIR', '/Users/hyungseoklee/Documents/Leonardo/backend/cache')
 
 HOLIDAY_PATH = os.path.join(CACHE_DIR, 'holidays.csv')
 STOCK_LIST_PATH = os.path.join(CACHE_DIR, 'stock_list.csv')
+
+import FinanceDataReader as fdr
+from pykrx import stock  # ✅ pykrx 사용
+import pandas as pd
+import datetime
+from pykrx.stock import get_nearest_business_day_in_a_week
+from tqdm import tqdm
+
+def normalize_code(code):
+    return str(code).zfill(6)
+
+def clean_market_column(df):
+    df = df[df["Market"] != "KONEX"].copy()
+    df["Market"] = df["Market"].replace("KOSDAQ GLOBAL", "KOSDAQ")
+    return df
 
 def get_recent_trading_dates(n_days=10):
     """
@@ -47,8 +55,10 @@ def has_price_movement(code):
         hist = fdr.DataReader(code, start_date)
         if len(hist) < 5:
             return False
-        return hist['Close'].nunique() > 1
-    except:
+        result = hist['Close'].nunique() > 1
+        return result
+    except Exception as e:
+        logger.warning(f"❌ {code} 데이터 조회 실패: {e}")
         return False
 
 def main():
@@ -56,23 +66,25 @@ def main():
         # 1. 종목 리스트 불러오기
         logger.info("📥 최신 종목 목록을 가져오는 중...")
         df = fdr.StockListing('KRX')[['Name', 'Code', 'Market']]
-        df = df[df["Market"] != "KONEX"]
+        df = clean_market_column(df)
+
+        logger.info(f"🎯 원본 종목 수: {len(df)}")
 
         # 2. 최근 5거래일간 가격 변동이 없는 종목 제거
         tqdm.pandas(desc="⏳ 가격 변동 필터링 진행 중")
-        df["has_movement"] = df["Code"].progress_apply(has_price_movement)
-        excluded_df = df[~df["has_movement"]]
-        print("🧹 최근 5거래일 동안 가격이 변하지 않은 종목:")
-        print(excluded_df[["Name", "Code"]])
-        df = df[df["has_movement"]]
-        df = df.drop(columns=["has_movement"])
+        df["Code"] = df["Code"].apply(normalize_code)
+        df = df[df["Code"].progress_apply(has_price_movement)]
+        logger.info(f"🎯 가격변동 필터링 후 종목 수: {len(df)}")
+        logger.debug(f"📋 필터링 결과 미리보기:\n{df[['Name', 'Code']].head()}")
 
         # 3. 종목 코드 및 마켓 정리
-        df["Market"] = df["Market"].replace("KOSDAQ GLOBAL", "KOSDAQ")
-        df["Code"] = df["Code"].apply(lambda x: str(x).zfill(6))
+        df["Code"] = df["Code"].apply(normalize_code)
 
-        # 4. 우선주 및 스팩 제외 (정규표현식)
-        df = df[~df["Name"].str.contains(r"(?:[0-9]*우(?:B)?|우선주|스팩)", case=False, regex=True)]
+        # 4. 스팩 제외 (정규표현식 사용하지 않음)
+        df = df[~df["Name"].str.contains("스팩", case=False, regex=False)]
+
+        # 4.5. 우선주 제외 (5, 7, 9, K, L, M로 끝나는 경우)
+        df = df[~df["Code"].str.endswith(tuple("579KLM"))]
 
         # 5. 시가총액 정보 병합
         today = datetime.datetime.today().strftime("%Y%m%d")
@@ -80,7 +92,7 @@ def main():
         kospi_cap = stock.get_market_cap_by_ticker(valid_date, market="KOSPI")[["시가총액"]]
         kosdaq_cap = stock.get_market_cap_by_ticker(valid_date, market="KOSDAQ")[["시가총액"]]
         for cap_df in (kospi_cap, kosdaq_cap):
-            cap_df.index = cap_df.index.map(lambda x: str(x).zfill(6))
+            cap_df.index = cap_df.index.map(normalize_code)
         cap = kospi_cap.combine_first(kosdaq_cap).reset_index()
         cap.columns = ["Code", "MarketCap"]
         cap["MarketCap"] = cap["MarketCap"].astype("Int64")
