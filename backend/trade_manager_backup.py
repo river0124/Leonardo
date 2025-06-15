@@ -4,7 +4,6 @@ import threading
 from loguru import logger
 from calculate_atr import calculate_atr
 
-import subprocess
 # from utils import get_order_detail
 import queue
 
@@ -13,7 +12,7 @@ execution_queue = queue.Queue()
 
 
 # 상수 정의
-CACHE_DIR_NAME = "cache"
+CACHE_DIR_NAME = "../../LeonardoOption/Backend/cache"
 STOPLOSS_FILE_NAME = "stoploss.json"
 # TRADE_LOG_FILE_NAME은 __init__에서 동적으로 결정됩니다.
 
@@ -569,7 +568,7 @@ class TradeManager:
 
 # --- Entry point for standalone execution ---
 if __name__ == "__main__":
-    from utils import KoreaInvestAPI
+    from utils_backup import KoreaInvestAPI
     cfg = load_config()
     api = KoreaInvestAPI(cfg)
     trade_manager = TradeManager(api, cfg)

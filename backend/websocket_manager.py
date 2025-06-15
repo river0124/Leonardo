@@ -7,7 +7,6 @@ import json
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from base64 import b64decode
-from binascii import unhexlify
 import traceback
 
 # Ensure DEBUG is accessible and properly set from settings

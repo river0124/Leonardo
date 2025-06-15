@@ -1,13 +1,9 @@
-from utils import KoreaInvestAPI, KoreaInvestEnv
+from utils_backup import KoreaInvestAPI, KoreaInvestEnv
 from settings import cfg
 import time
 import json
-from loguru import logger
 import pandas as pd
 from loguru import logger
-import io
-
-import requests
 
 CACHE_DIR = "/Users/hyungseoklee/Documents/Leonardo/backend/cache"
 

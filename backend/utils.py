@@ -1,19 +1,20 @@
-import copy
 import json
 import time
-from collections import namedtuple
-import traceback
 import pandas as pd
 import requests
 from loguru import logger
 import os
-from settings import cfg
+from dotenv import load_dotenv, dotenv_values
+from collections import namedtuple
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_DIR = os.path.join(BASE_DIR, "cache")
-SETTINGS_FILE = os.path.join(CACHE_DIR, "settings.json")
+BASE_DIR = os.getenv('BASE_DIR', os.path.dirname(os.path.abspath(__file__)))
+CACHE_DIR = os.getenv('CACHE_DIR', os.path.join(BASE_DIR, 'cache'))
+SETTINGS_FILE = os.getenv('SETTINGS_FILE', os.path.join(CACHE_DIR, 'settings.json'))
+load_dotenv()
 
-DEBUG = cfg.get("DEBUG", "False").lower() == "true"
+with open(os.path.join(CACHE_DIR, "settings.json"), "r", encoding="utf-8") as f:
+    settings_vars = json.load(f)
+DEBUG = settings_vars.get("DEBUG", "False").lower() == "true"
 
 # 로그 경로를 현재 파일(__file__) 기준으로 안전하게 구성
 LOG_PATH = os.path.join(os.path.dirname(__file__), "logs", "trading_{time:YYYY-MM-DD}.log")
@@ -22,35 +23,33 @@ os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 # 로그 파일 설정
 logger.add(LOG_PATH, rotation="10 MB", retention="10 days", encoding="utf-8", enqueue=True)
 
-def create_env_api():
-    with open("cache/settings.json") as f:
-        cfg = json.load(f)
-    env = KoreaInvestEnv(cfg)
-    api = KoreaInvestAPI(cfg, env.get_base_headers())
-    return env, api
-
 class KoreaInvestEnv:
-    def __init__(self, cfg):
+    def __init__(self):
+        settings_path = os.path.join(CACHE_DIR, "settings.json")
+        with open(settings_path, "r", encoding="utf-8") as f:
+            settings_vars = json.load(f)
+
+        env_vars = dotenv_values('.env')
+        cfg = {**settings_vars, **env_vars}
         self.cfg = cfg
-        self.custtype = cfg.get('custtype', 'P')
-        self.api_key = cfg["api_key"]
-        self.api_secret_key = cfg["api_secret_key"]
         self.base_headers = {
-            "content_Type": "application/json",
+            "content_Type": "application/json; charset=utf-8",
             "Accept": "text/plain",
             "charset": "UTF-8",
-            "User_Agent": cfg.get("my_agent", "")
+            "User_Agent": self.cfg.get("user_agent", "")
         }
-        # Remove file-based token logic; just set access_token from cfg
-        self.is_paper_trading = cfg.get("is_paper_trading", True)
+
+        self.is_paper_trading = self.cfg.get("is_paper_trading")
 
         # 1. 토큰 선택
         if self.is_paper_trading:
             self.access_token = cfg["papertoken"]
-            token_issued_at = cfg.get("papertoken_issued_at", 0)
+            self.account_num = cfg["paper_stock_account_number"]
+            token_issued_at = self.cfg.get("papertoken_issued_at", 0)
         else:
             self.access_token = cfg["realtoken"]
-            token_issued_at = cfg.get("realtoken_issued_at", 0)
+            self.account_num = cfg["stock_account_number"]
+            token_issued_at = self.cfg.get("realtoken_issued_at", 0)
         self.token_issued_at = token_issued_at  # <-- Add this line
 
         # 2. 현재 시간과 토큰 발급 시간 차이 체크 (23시간 = 82800초)
@@ -62,32 +61,17 @@ class KoreaInvestEnv:
 
         # 3. 헤더 초기 설정
         self.base_headers["authorization"] = self.access_token
-
-        if self.is_paper_trading:
-            using_url = cfg.get("paper_url", "")
-            api_key = cfg.get("paper_api_key", "")
-            api_secret_key = cfg.get("paper_api_secret_key", "")
-            account_num = cfg.get("paper_stock_account_number", "")
-        else:
-            using_url = cfg.get("url", "")
-            api_key = cfg.get("api_key", "")
-            api_secret_key = cfg.get("api_secret_key", "")
-            account_num = cfg.get("stock_account_number", "")
-
         self.request_base_url = cfg["paper_url"] if self.is_paper_trading else cfg["url"]
         websocket_approval_key = cfg.get("websocket_approval_key")
         if not websocket_approval_key:
             logger.warning("❗ cfg에 approval_key 없음 – 직접 발급 시도")
             websocket_approval_key = self.get_websocket_approval_key()
         self.cfg["websocket_approval_key"] = websocket_approval_key
-        # No need to call get_account_access_token (file-based); use access_token from cfg
-        self.base_headers["authorization"] = self.access_token
-        # Debug: show which token file is selected
-        # (already logged above)
-        self.base_headers["appkey"] = api_key
-        self.base_headers["appsecret"] = api_secret_key
-        self.cfg["account_num"] = account_num
-        self.cfg["using_url"] = using_url
+
+    @classmethod
+    def get_env_keys_list(cls):
+        env_vars = dotenv_values('.env')
+        return list(env_vars.keys())
 
     def get_base_headers(self):
         headers = self.base_headers.copy()
@@ -95,96 +79,26 @@ class KoreaInvestEnv:
         headers["authorization"] = self.access_token
         return headers
 
-    def get_full_config(self):
-        return copy.deepcopy(self.cfg)
-
-    def refresh_access_token(self):
-        if DEBUG:
-            logger.info("🔁 토큰 갱신 시작")
-        logger.debug("🛠️ [refresh_access_token] 함수 진입 확인")
-
-        # 토큰 발급 URL
-        if self.is_paper_trading:
-            token_url = self.cfg.get("paper_url", "").rstrip("/") + "/oauth2/tokenP"
-            api_key = self.cfg.get("paper_api_key")
-            api_secret_key = self.cfg.get("paper_api_secret_key")
-        else:
-            token_url = self.cfg.get("url", "").rstrip("/") + "/oauth2/tokenP"
-            api_key = self.cfg.get("api_key")
-            api_secret_key = self.cfg.get("api_secret_key")
-
-        payload = {
-            "grant_type": "client_credentials",
-            "appkey": api_key,
-            "appsecret": api_secret_key
-        }
-
-        try:
-            response = requests.post(token_url, json=payload)
-            if response.status_code != 200:
-                logger.error(f"❌ 토큰 발급 실패: {response.status_code} {response.text}")
-                raise Exception(f"토큰 갱신 실패: {response.status_code} {response.text}")
-
-            data = response.json()
-            if "access_token" not in data:
-                logger.error(f"❌ access_token 누락: {data}")
-                raise Exception(f"토큰 갱신 실패: access_token 누락")
-
-            new_token = "Bearer " + data["access_token"]
-
-            # 토큰 및 발급시간 갱신
-            self.access_token = new_token
-            self.token_issued_at = int(time.time())
-
-            # 헤더 갱신
-            self.base_headers["authorization"] = new_token
-
-            # cfg에도 갱신된 토큰과 시간 저장
-            if self.is_paper_trading:
-                self.cfg["papertoken"] = new_token
-                self.cfg["papertoken_issued_at"] = self.token_issued_at
-            else:
-                self.cfg["realtoken"] = new_token
-                self.cfg["realtoken_issued_at"] = self.token_issued_at
-
-            # cfg에도 갱신된 토큰과 시간 저장 후 settings.json 저장
-            try:
-                with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(self.cfg, f, ensure_ascii=False, indent=2)
-                logger.debug(f"✅ settings.json 저장 완료: {SETTINGS_FILE}")
-            except Exception as e:
-                logger.error(f"❌ settings.json 저장 실패: {e}")
-
-            if DEBUG:
-                logger.info("✅ 토큰 갱신 완료")
-
-        except Exception as e:
-            logger.error(f"❌ 토큰 갱신 중 예외 발생: {e}")
-            raise
-
     def get_websocket_approval_key(self):
         logger.debug("[get_websocket_approval_key] 🔁 함수 호출됨")
-        if self.is_paper_trading:
-            appkey = self.cfg["paper_api_key"]
-            secretkey = self.cfg["paper_api_secret_key"]
-            request_base_url = self.cfg["paper_url"]
-        else:
-            appkey = self.cfg["api_key"]
-            secretkey = self.cfg["api_secret_key"]
-            request_base_url = self.cfg["url"]
 
-        request_url = f"{request_base_url}/oauth2/Approval"
+        if self.is_paper_trading:
+            api_key = self.cfg["paper_api_key"]
+            api_secret_key = self.cfg["paper_api_secret_key"]
+            base_url = self.cfg["paper_url"]
+        else:
+            api_key = self.cfg["api_key"]
+            api_secret_key = self.cfg["api_secret_key"]
+            base_url = self.cfg["url"]
+
         headers = {"content-type": "application/json"}
         body = {
             "grant_type": "client_credentials",
-            "appkey": appkey,
-            "secretkey": secretkey
+            "appkey": api_key,
+            "secretkey": api_secret_key
         }
 
-        logger.info(f"🔑 [get_websocket_approval_key] 최종 요청 URL: {request_url}")
-        logger.info(f"🔐 [get_websocket_approval_key] appkey: {appkey}, secretkey: {secretkey}")
-
-        res = requests.post(request_url, headers=headers, data=json.dumps(body))
+        res = requests.post(base_url, headers=headers, data=json.dumps(body))
 
         try:
             data = res.json()
@@ -216,27 +130,113 @@ class KoreaInvestEnv:
 
         return data
 
-class KoreaInvestAPI:
-    def __init__(self, cfg, base_headers, websocket_approval_key=None):
-        self.cfg = cfg
-        self.approval_key = cfg["websocket_approval_key"]
-        self.custtype = cfg.get("custtype", "P")
-        self._base_headers = base_headers
-        self.access_token = self._base_headers.get("authorization", "")
-        self.is_paper_trading = cfg.get("is_paper_trading", True)
-        self.websocket_url = cfg["paper_websocket_url"] if self.is_paper_trading else cfg["websocket_url"]
-        self.using_url = self.cfg["paper_url"] if self.is_paper_trading else self.cfg["url"]
-        # Remove get_websocket_approval_key from KoreaInvestAPI; rely on passed or cfg.
+    def refresh_access_token(self):
+        #토큰 발급 URL
+        if self.is_paper_trading:
+            token_url = self.cfg.get("paper_url") + "/oauth2/tokenP"
+            api_key = self.cfg.get("paper_api_key")
+            api_secret_key = self.cfg.get("paper_api_secret_key")
+        else:
+            token_url = self.cfg.get("url") + "/oauth2/tokenP"
+            api_key = self.cfg.get("api_key")
+            api_secret_key = self.cfg.get("api_secret_key")
 
-        self.account_num = cfg.get("account_num", "")
-        self.htsid = cfg.get("htsid", "")
+        payload = {
+            "grant_type": "client_credentials",
+            "appkey": api_key,
+            "appsecret": api_secret_key
+        }
+
+        try:
+            response = requests.post(token_url, json=payload)
+            if response.status_code != 200:
+                logger.error(f"❌ 토큰 발급 실패: {response.status_code} {response.text}")
+                raise Exception(f"토큰 갱신 실패: {response.status_code} {response.text}")
+
+            data = response.json()
+            if "access_token" not in data:
+                logger.error(f"❌ access_token 누락: {data}")
+                raise Exception(f"토큰 갱신 실패: access_token 누락")
+
+            # 토큰 및 발급시간 갱신
+            self.access_token = "Bearer " + data["access_token"]
+            self.token_issued_at = int(time.time())
+
+            # 헤더 갱신
+            self.base_headers["authorization"] = self.access_token
+
+            # cfg에도 갱신된 토큰과 시간 저장
+            if self.is_paper_trading:
+                self.cfg["papertoken"] = self.access_token
+                self.cfg["papertoken_issued_at"] = self.token_issued_at
+            else:
+                self.cfg["realtoken"] = self.access_token
+                self.cfg["realtoken_issued_at"] = self.token_issued_at
+
+            # cfg에도 갱신된 토큰과 시간 저장 후 settings.json 저장
+            # 제외할 키 목록을 명시적으로 정의
+            try:
+                # 1. 기존 settings.json 불러오기
+                if os.path.exists(SETTINGS_FILE):
+                    with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                        existing_cfg = json.load(f)
+                else:
+                    existing_cfg = {}
+
+                # 2. 변한 키만 필터링해서 추출 (.env 키 제외)
+                changed_cfg = {k: v for k, v in self.cfg.items() if k not in self.get_env_keys_list()}
+
+                # 3. 기존 값에 덮어쓰기
+                existing_cfg.update(changed_cfg)
+
+                # 4. 다시 저장
+                with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(existing_cfg, f, ensure_ascii=False, indent=2)
+
+                logger.debug(f"✅ settings.json 부분 저장 완료: {SETTINGS_FILE}")
+
+            except Exception as e:
+                logger.error(f"❌ settings.json 저장 실패: {e}")
+
+            if DEBUG:
+                logger.info("✅ 토큰 갱신 완료")
+
+        except Exception as e:
+            logger.error(f"❌ 토큰 갱신 중 예외 발생: {e}")
+            raise
+
+class KoreaInvestAPI:
+    def __init__(self):
+        env_instance = KoreaInvestEnv() #KoreaInvestEnv의 cfg를 인스턴스로 가지고 오기
+        self.cfg = env_instance.cfg
+        self.access_token = env_instance.access_token
+        self.base_headers = env_instance.base_headers
+        self.is_paper_trading = env_instance.is_paper_trading
+        self.request_base_url = env_instance.request_base_url
+        self.account_num = env_instance.account_num
+        self.websocket_url = self.cfg["paper_websocket_url"] if self.is_paper_trading else self.cfg["websocket_url"]
+        self.approval_key = self.cfg["websocket_approval_key"]
+        self.custtype = self.cfg["custtype"]
+        self.htsid = self.cfg.get("htsid")
+
+        # API의 컬럼들을 elements_map_type.json에 따라 맵핑하기 위해 로드 (label, dtype 모두)
+        try:
+            with open(os.path.join(CACHE_DIR, "elements_map_type.json"), "r", encoding="utf-8") as f:
+                self.col_type_map = json.load(f)
+            self.col_map = {k: v["label"] for k, v in self.col_type_map.items()}
+        except Exception as e:
+            logger.warning(f"⚠️ 컬럼 타입 매핑 파일 로딩 실패: {e}")
+            self.col_type_map = {}
+            self.col_map = {}
+        self.col_reverse_map = {v: k for k, v in self.col_map.items()}
+        self.col_order = list(self.col_map.keys())
 
     def set_order_hash_key(self, h, p):
         # 주문 API에서 사용할 hash key값을 받아 header에 설정해 주는 함수
         # Input: HTTP Header, HTTP post param
         # Output: None
 
-        url = f"{self.using_url}/uapi/hashkey"
+        url = f"{self.request_base_url}/uapi/hashkey"
 
         res = requests.post(url, data=json.dumps(p), headers=h)
         rescode = res.status_code
@@ -246,220 +246,276 @@ class KoreaInvestAPI:
         else:
             if DEBUG: logger.info(f"Error: {rescode}")
 
-    def do_sell(self, stock_code, order_qty, order_price, order_type="00"):
-        t1 = self.do_order(stock_code, order_qty, order_price, buy_flag=False, order_type=order_type)
-        return t1
+    def get_and_parse_response(self, url: str, tr_id: str, params: dict, is_post_request=False, use_hash=True):
+        try:
+            headers = {
+                "content-type": "application/json; charset=utf-8",
+                "authorization": self.cfg["papertoken"] if self.is_paper_trading else self.cfg["realtoken"],
+                "appkey": self.cfg["paper_api_key"] if self.is_paper_trading else self.cfg["api_key"],
+                "appsecret": self.cfg["paper_api_secret_key"] if self.is_paper_trading else self.cfg["api_secret_key"],
+                "tr_id": tr_id,
+                "custtype": self.custtype,
+            }
 
-    def do_buy(self, stock_code, order_qty, order_price, order_type="00"):
-        t1 = self.do_order(stock_code, order_qty, order_price, buy_flag=True, order_type=order_type)
-        return t1
+            if is_post_request:
+                if use_hash:
+                    self.set_order_hash_key(headers, params)
+                response = requests.post(url, headers=headers, json=params)
+            else:
+                response = requests.get(url, headers=headers, params=params)
 
-    def do_order(self, stock_code, order_qty, order_price, prd_code="01", buy_flag=True, order_type="00"):
-        url = "/uapi/domestic-stock/v1/trading/order-cash"
+            if response.status_code == 200:
+                if DEBUG: logger.info(f"Message : {response.status_code} | {response.text}")
+                return APIResponse(response)
+            else:
+                if DEBUG: logger.info(f"Error Code : {response.status_code} | {response.text}")
+                if DEBUG: logger.debug(f"❌ 응답 실패 본문: {response.text}")
+                return None
 
-        if buy_flag:
-            tr_id = "TTTC0012U" #실전투자 매수
-            if self.is_paper_trading:
-                tr_id = "VTTC0012U" #모의투자 매수
+        except Exception as e:
+            logger.exception(f"❌ requests 예외 발생: {e}")
+            if DEBUG: logger.debug(f"❌ 예외 발생 중 URL: {url}")
+            return None
 
-        else:
-            tr_id = "TTTC0011U"  #실전투자 매도
-            if self.is_paper_trading:
-                tr_id = "VTTC0011U" #모의투자 매도
+    def map_and_order_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        # 컬럼 이름 변경
+        new_columns = [self.col_map.get(col, col) for col in df.columns]
+        df.columns = new_columns
+
+        # dtype 변환 수행
+        for col in df.columns:
+            col_key = self.col_reverse_map.get(col, col)
+            dtype_info = self.col_type_map.get(col_key)
+            if dtype_info:
+                dtype = dtype_info.get("dtype", "str")
+                try:
+                    if dtype == "int":
+                        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                    elif dtype == "float":
+                        df[col] = pd.to_numeric(df[col], errors='coerce').astype(float)
+                    elif dtype == "str":
+                        df[col] = df[col].astype(str)
+                except Exception as e:
+                    logger.warning(f"⚠️ {col} 컬럼 변환 실패: {e}")
+        logger.debug(f"🧾 변환된 컬럼 목록: {list(df.columns)}")
+        return df
+
+    def do_sell(self, stock_code, order_qty, order_price, order_type):
+        url = self.request_base_url + "/uapi/domestic-stock/v1/trading/order-cash"
+        tr_id = "VTTC0011U" if self.is_paper_trading else "TTTC0011U"
 
         params = {
-            "CANO": self.account_num,
-            "ACNT_PRDT_CD": prd_code,
-            "PDNO" : stock_code,
-            "ORD_DVSN" : order_type,
-            "ORD_QTY" : str(order_qty),
-            "ORD_UNPR" : str(order_price),
-            "CNDT_PRIC" : "",
-            "SLL_TYPE" : "01",
-            "ALGO_NO" : ""
+            "CANO": self.account_num[:8],  # 종합계좌번호
+            "ACNT_PRDT_CD": self.account_num[8:],  # 상품유형코드
+            "PDNO": stock_code,  # 종목코드(6자리) , ETN의 경우 7자리 입력
+            "SLL_TYPE": "",  # 01@일반매도 | 02@임의매매 | 05@대차매도 | → 미입력시 01 일반매도로 진행
+            "ORD_DVSN": order_type,
+            # [KRX] 00 : 지정가 | 01 : 시장가 | 02 : 조건부지정가 | 03 : 최유리지정가 | 04 : 최우선지정가 | 05 : 장전 시간외 | 06 : 장후 시간외 | 07 : 시간외 단일가
+            # 11 : IOC지정가 (즉시체결,잔량취소) | 12 : FOK지정가 (즉시체결,전량취소) | 13 : IOC시장가 (즉시체결,잔량취소) | 14 : FOK시장가 (즉시체결,전량취소) | 15 : IOC최유리 (즉시체결,잔량취소) | 16 : FOK최유리 (즉시체결,전량취소)
+            # 21 : 중간가 | 22 : 스톱지정가 | 23 : 중간가IOC | 24 : 중간가FOK
+            "ORD_QTY": order_qty,  # 주문수량
+            "ORD_UNPR": order_price,  # 주문단가 | 시장가 등 주문시, "0"으로 입력
+            "CNDT_PRIC": "",  # 스탑지정가호가 주문 (ORD_DVSN이 22) 사용 시에만 필수
+            "EXCG_ID_DVSN_CD": "KRX"
+            # 한국거래소 : KRX | 대체거래소 (넥스트레이드) : NXT | SOR (Smart Order Routing) : SOR | → 미입력시 KRX로 진행되며, 모의투자는 KRX만 가능
         }
 
-        t1 = self._url_fetch(url, tr_id, params, is_post_request=True, use_hash=True)
+        data = self.get_and_parse_response(url, tr_id, params, is_post_request=True, use_hash=True)
+        if not data:
+            return pd.DataFrame()
 
-        if t1 is not None and t1.is_ok():
-            return t1
-        elif t1 is None:
-            return None
-        else:
-            t1.print_error()
-            return t1
+        body = data.get_body()
+        df = pd.DataFrame([body._asdict()])
+        df = self.map_and_order_columns(df)
 
-    def do_cancel(self, order_no, order_qty, order_price="01", order_branch= "06010", prd_code="01", order_dv="00", cncl_dv= "02", qty_all_yn="Y"):
-        return self._do_cancel_revise(order_no, order_branch, order_qty, order_price, prd_code, order_dv, cncl_dv, qty_all_yn)
+        return df
 
-    def do_revise(self, order_no, order_qty, order_price, order_branch= "06010", prd_code="01", order_dv="00", cncl_dv= "01", qty_all_yn="Y"):
-        return self._do_cancel_revise(order_no, order_branch, order_qty, order_price, prd_code, order_dv, cncl_dv, qty_all_yn)
+    def do_buy(self, stock_code, order_qty, order_price, order_type):
+        url = self.request_base_url + "/uapi/domestic-stock/v1/trading/order-cash"
+        tr_id = "VTTC0012U" if self.is_paper_trading else "TTTC0012U"
 
-    def get_orders(self, prd_code="01"):
-        url = "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
-        tr_id = "TTTC0084R"
         params = {
-            "CANO": self.account_num,
-            "ACNT_PRDT_CD": prd_code,
-            "CTX_AREA_FK100" : "",
+            "CANO": self.account_num[:8],  # 종합계좌번호
+            "ACNT_PRDT_CD": self.account_num[8:],  # 상품유형코드
+            "PDNO": stock_code,  # 종목코드(6자리) , ETN의 경우 7자리 입력
+            "SLL_TYPE": "",  # 01@일반매도 | 02@임의매매 | 05@대차매도 | → 미입력시 01 일반매도로 진행
+            "ORD_DVSN": order_type, # [KRX] 00 : 지정가 | 01 : 시장가 | 02 : 조건부지정가 | 03 : 최유리지정가 | 04 : 최우선지정가 | 05 : 장전 시간외 | 06 : 장후 시간외 | 07 : 시간외 단일가
+                                    # 11 : IOC지정가 (즉시체결,잔량취소) | 12 : FOK지정가 (즉시체결,전량취소) | 13 : IOC시장가 (즉시체결,잔량취소) | 14 : FOK시장가 (즉시체결,전량취소) | 15 : IOC최유리 (즉시체결,잔량취소) | 16 : FOK최유리 (즉시체결,전량취소)
+                                    # 21 : 중간가 | 22 : 스톱지정가 | 23 : 중간가IOC | 24 : 중간가FOK
+            "ORD_QTY": order_qty,  # 주문수량
+            "ORD_UNPR": order_price,  # 주문단가 | 시장가 등 주문시, "0"으로 입력
+            "CNDT_PRIC": "",  # 스탑지정가호가 주문 (ORD_DVSN이 22) 사용 시에만 필수
+            "EXCG_ID_DVSN_CD": "KRX" # 한국거래소 : KRX | 대체거래소 (넥스트레이드) : NXT | SOR (Smart Order Routing) : SOR | → 미입력시 KRX로 진행되며, 모의투자는 KRX만 가능
+        }
+
+        data = self.get_and_parse_response(url, tr_id, params, is_post_request=True, use_hash=True)
+        if not data:
+            return pd.DataFrame()
+
+        body = data.get_body()
+        df = pd.DataFrame([body._asdict()])
+        df = self.map_and_order_columns(df)
+
+        return df
+
+    def order_revise(self, order_branch, order_num, reve_cncl_code, qty_all, order_qty, order_price, order_type):
+        # 주식주문(정정취소) 정정은 원주문에 대한 주문단가 혹은 주문구분을 변경하는 사항으로, 정정이 가능한 수량은 원주문수량을 초과 할 수 없습니다.
+        # 주식주문(정정취소) 호출 전에 반드시 주식정정취소가능주문조회 호출을 통해 정정취소가능수량(output > psbl_qty)을 확인하신 후 정정취소주문 내시기 바랍니다.
+
+        url = self.request_base_url + "/uapi/domestic-stock/v1/trading/order-rvsecncl"
+        tr_id = "VTTC0013U" if self.is_paper_trading else "TTTC0013U"
+
+        params = {
+            "CANO": self.account_num[:8],
+            "ACNT_PRDT_CD": self.account_num[8:],
+            "KRX_FWDG_ORD_ORGNO": order_branch,
+            "ORGN_ODNO": order_num,  # 종목코드(6자리) , ETN의 경우 7자리 입력
+            "ORD_DVSN": order_type, # [KRX] 00 : 지정가 | 01 : 시장가 | 02 : 조건부지정가 | 03 : 최유리지정가 | 04 : 최우선지정가 | 05 : 장전 시간외 | 06 : 장후 시간외 | 07 : 시간외 단일가
+                                    # 11 : IOC지정가 (즉시체결,잔량취소) | 12 : FOK지정가 (즉시체결,전량취소) | 13 : IOC시장가 (즉시체결,잔량취소) | 14 : FOK시장가 (즉시체결,전량취소) | 15 : IOC최유리 (즉시체결,잔량취소) | 16 : FOK최유리 (즉시체결,전량취소)
+                                    # 21 : 중간가 | 22 : 스톱지정가 | 23 : 중간가IOC | 24 : 중간가FOK
+            "RVSE_CNCL_DVSN_CD" : reve_cncl_code, # 01@정정 |02@취소
+            "ORD_QTY": order_qty,  # 주문수량
+            "ORD_UNPR": order_price,  # 주문단가 | 시장가 등 주문시, "0"으로 입력
+            "QTY_ALL_ORD_YN": qty_all,  # 'Y@전량 | N@일부'
+        }
+
+        data = self.get_and_parse_response(url, tr_id, params, is_post_request=True, use_hash=True)
+        if not data:
+            return pd.DataFrame()
+
+        body = data.get_body()
+        df = pd.DataFrame([body._asdict()])
+        df = self.map_and_order_columns(df)
+
+        return df
+
+    def current_price(self, stock_no):
+
+        url = self.request_base_url + "/uapi/domestic-stock/v1/quotations/inquire-price"
+        tr_id = "FHKST01010100"
+
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": stock_no
+        }
+
+        data = self.get_and_parse_response(url, tr_id, params)
+
+        if not data:
+            return pd.DataFrame()
+        output = data.get_body().output
+        df = pd.DataFrame([output]) if isinstance(output, dict) else pd.DataFrame(output)
+        df = self.map_and_order_columns(df)
+
+        return df
+
+    def inquire_psbl_rvsecncl(self):
+        # 주식정정취소가능주문조회
+        if self.is_paper_trading:
+            logger.info("모의투자는 지원하지 않습니다.")
+            return None
+
+        url = self.request_base_url + "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
+        tr_id = "TTTC0084R"
+
+        params = {
+            "CANO": self.account_num[:8],
+            "ACNT_PRDT_CD": self.account_num[8:],
+            "CTX_AREA_FK100": "",
             "CTX_AREA_NK100": "",
             "INQR_DVSN_1": "0",
             "INQR_DVSN_2": "0",
         }
 
-        t1 = self._url_fetch(url, tr_id, params)
+        data = self.get_and_parse_response(url, tr_id, params)
 
-        if t1 is not None and t1.is_ok() and t1.get_body().output:
-            tdf = pd.DataFrame(t1.get_body().output)
-            tdf.set_index("odno", inplace=True)
-            cf1 = ["pdno", "ord_qty", "ord_unpr", "ord_tmd", "ord_gno_brno", "orgn_odno", "psbl_qty"]
-            cf2 = ["종목코드", "주문수량", "주문단가", "주문시간", "주문점", "원주문번호", "주문가능수량"]
-            tdf = tdf[cf1]
-            ren_dict = dict(zip(cf1, cf2))
+        if not data:
+            return pd.DataFrame()
+        output = data.get_body().output
+        df = pd.DataFrame([output]) if isinstance(output, dict) else pd.DataFrame(output)
+        df = self.map_and_order_columns(df)
 
-            return tdf.rename(column=ren_dict)
-        else:
-            return None
+        return df
 
-    def _do_cancel_revise(self, order_no, order_branch, order_qty, order_price, prd_code, order_dv, cncl_dv, qty_all_yn):
-        # 특정 주문 취소 (01) / 정정 (02)
-        # Input: 주문번호(get_order를 호출하여 얻은 DateFrame의 index column 값이 취소 가능한 주문번호임)
-        #        주문점(통상 06010), 주문수량, 주문가격, 상품코드(01), 주문유형(00), 정정구분(취소-02, 정정-01)
-        # Output: ARIPresponse object
+    def inquire_psbl_order(self, stock_code, order_price, ord_dvsn):
+        # 매수가능조회
+        '''
+        1) 매수가능금액 확인
+        . 미수 사용 X: nrcvb_buy_amt(미수없는매수금액) 확인
+        . 미수 사용 O: max_buy_amt(최대매수금액) 확인
 
-        url = "/uapi/domestic-stock/v1/trading/order-rvsecncl"
-        tr_id = "TTTC0013U"
+
+        2) 매수가능수량 확인
+        . 특정 종목 전량매수 시 가능수량을 확인하실 경우 ORD_DVSN:00(지정가)는 종목증거금율이 반영되지 않습니다.
+        따라서 "반드시" ORD_DVSN:01(시장가)로 지정하여 종목증거금율이 반영된 가능수량을 확인하시기 바랍니다.
+        (다만, 조건부지정가 등 특정 주문구분(ex.IOC)으로 주문 시 가능수량을 확인할 경우 주문 시와 동일한 주문구분(ex.IOC) 입력하여 가능수량 확인)
+
+        . 미수 사용 X: ORD_DVSN:01(시장가) or 특정 주문구분(ex.IOC)로 지정하여 nrcvb_buy_qty(미수없는매수수량) 확인
+        . 미수 사용 O: ORD_DVSN:01(시장가) or 특정 주문구분(ex.IOC)로 지정하여 max_buy_qty(최대매수수량) 확인
+        '''
+        url = self.request_base_url + "/uapi/domestic-stock/v1/trading/inquire-psbl-order"
+        tr_id = "VTTC8908R" if self.is_paper_trading else "TTTC8908R"
 
         params = {
-            "CANO": self.account_num,
-            "ACNT_PRDT_CD": prd_code,
-            "KRX_FWDG_ORD_ORGNO": order_branch,
-            "ORGN_ODNO" : order_no,
-            "ORD_DVSN" : order_dv,
-            "RVSE_CNCL_DVSN_CD" : cncl_dv, #취소(02)
-            "ORD_QTY" : str(order_qty),
-            "ORD_UNPR" : str(order_price),
-            "QTY_ALL_ORD_YN" : qty_all_yn
+            "CANO": self.account_num[:8],  # 종합계좌번호
+            "ACNT_PRDT_CD": self.account_num[8:],  # 상품유형코드
+            "PDNO": stock_code,
+            "ORD_UNPR": order_price, #1주당 가격 | 시장가(ORD_DVSN:01)로 조회 시, 공란으로 입력 | PDNO, ORD_UNPR 공란 입력 시, 매수수량 없이 매수금액만 조회됨
+            "ORD_DVSN": ord_dvsn, # 주문구분 00 : 지정가 | 01 : 시장가 | 02 : 조건부지정가 | 03 : 최유리지정가 | 04 : 최우선지정가
+                                  # 특정 종목 전량매수 시 가능수량을 확인할 경우 00:지정가는 증거금율이 반영되지 않으므로 증거금율이 반영되는 01: 시장가로 조회
+                                  # 다만, 조건부지정가 등 특정 주문구분(ex.IOC)으로 주문 시 가능수량을 확인할 경우 주문 시와 동일한 주문구분(ex.IOC) 입력하여 가능수량 확인
+                                  # 종목별 매수가능수량 조회 없이 매수금액만 조회하고자 할 경우 임의값(00) 입력
+            "CMA_EVLU_AMT_ICLD_YN": "N", #Y : 포함 | N : 포함하지 않음
+            "OVRS_ICLD_YN": "N", #Y : 포함 | N : 포함하지 않음
         }
 
-        t1 = self._url_fetch(url, tr_id, params=params, is_post_request=True)
+        data = self.get_and_parse_response(url, tr_id, params)
 
-        if t1 is not None and t1.is_ok():
-            return t1
-        elif t1 is None:
-            return None
-        else:
-            t1.print_error()
-            return None
+        if not data:
+            return pd.DataFrame()
+        output = data.get_body().output
+        df = pd.DataFrame([output]) if isinstance(output, dict) else pd.DataFrame(output)
+        df = self.map_and_order_columns(df)
 
-    def _url_fetch(self, api_url, tr_id, params, is_post_request=False, use_hash=True):
-        try:
-            url = f"{self.using_url}{api_url}"
-            headers = self._base_headers.copy()
-            if tr_id[0] in ("T", "J", "C"):
-                if self.is_paper_trading:
-                    tr_id = "V" + tr_id[1:]
-            headers["tr_id"] = tr_id
-            headers["custtype"] = self.custtype
-            if is_post_request:
-                if use_hash:
-                    self.set_order_hash_key(headers, params)
-                res = requests.post(url, headers=headers, data=json.dumps(params))
-            else:
-                res = requests.get(url, headers=headers, params=params)
+        return df
 
-            if res.status_code == 200:
-                return APIResponse(res)
-            else:
-                if DEBUG: logger.info(f"Error Code : {res.status_code} | {res.text}")
-                logger.error(f"📡 API 응답 오류: {res.status_code}, {res.text}")
-                if DEBUG: logger.debug(f"❌ 응답 실패 본문: {res.text}")
-                return None
-        except Exception as e:
-            logger.exception(f"❌ requests 예외 발생: {e}")
-            if DEBUG: logger.debug(f"❌ 예외 발생 중 URL: {api_url}")
-            return None
+    def inquire_balance(self):
+        # 주식잔고조회
+        url = self.request_base_url + "/uapi/domestic-stock/v1/trading/inquire-balance"
+        tr_id = "VTTC8434R" if self.is_paper_trading else "TTTC8434R"
 
-
-    def get_env_config(self):
-        return {
-            "custtype": self.custtype,
-            "websocket_approval_key": self.websocket_approval_key,
-            "account_num": self.account_num,
-            "is_paper_trading": self.is_paper_trading,
-            "htsid": self.htsid,
-            "using_url": self.using_url,
-            "api_key": self._base_headers.get("appkey", ""),
-            "api_secret_key": self._base_headers.get("appsecret", "")
-        }
-
-    def do_cancel_all(self, skip_codes=[]):
-        tdf = self.get_orders()
-        if tdf is not None:
-            od_list = tdf.index.to_list()
-            qty_list = tdf["주문수량"].to_list()
-            price_list = tdf["주문단가"].to_list()
-            branch_list = tdf["주문점"].to_list()
-            codes_list = tdf["종목코드"].to_list()
-            cnt = 0
-            for x in od_list:
-                if codes_list[cnt] in skip_codes:
-                    continue
-                ar = self.do_cancel(x, qty_list[cnt], price_list[cnt], branch_list[cnt])
-                cnt += 1
-                if ar:
-                    if DEBUG: logger.info(f"get_error_code: {ar.get_error_code()}, get_error_message: {ar.get_error_message()} ")
-                else:
-                    if DEBUG: logger.warning("주문 취소 응답 없음")
-                time.sleep(0.02)
-
-    def get_current_price(self, stock_no):
-        url = "/uapi/domestic-stock/v1/quotations/inquire-price"
-        tr_id = "FHKST01010100"
         params = {
-            "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": stock_no
+            "CANO": self.account_num[:8],  # 종합계좌번호
+            "ACNT_PRDT_CD": self.account_num[8:],  # 상품유형코드
+            "AFHR_FLPR_YN": "N",
+            "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "01",
+            "OFL_YN": "N",
+            "INQR_DVSN": "01",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": ""
         }
-        t1 = self._url_fetch(url, tr_id, params)
-        if t1 and t1.is_ok():
-            # 📦 필수 주가 정보 필드 추출 및 통일된 구조 생성
-            data = t1.get_body().output
-            # 추출할 주요 필드와 한글 설명 (Korean inline comments)
-            fields_to_extract = {
-                "stck_prpr": "현재가",  # 주식의 현재 거래 가격
-                "w52_hgpr": "52주 최고가",  # 최근 52주간의 최고 가격
-                "w52_hgpr_date": "52주 최고가 일자",  # 52주 최고가가 기록된 날짜
-                "w52_lwpr": "52주 최저가",  # 최근 52주간의 최저 가격
-                "w52_lwpr_date": "52주 최저가 일자",  # 52주 최저가가 기록된 날짜
-                "w52_hgpr_vrss_prpr_ctrt": "52주 최고가 대비 현재가 대비",  # 현재가: "52주일 최고가 대비 현재가 대비:"
-                "w52_lwpr_vrss_prpr_ctrt": "52주 최저가 대비 현재가 대비",  # 현재가: "52주일 최저가 대비 현재가 대비:"
-                "acml_vol": "누적거래량",  # 당일 총 거래량
-                "stck_oprc": "시가",  # 당일 첫 거래 가격
-                "prdy_vrss": "전일대비",  # 전일 종가 대비 절대 변화량
-                "prdy_vrss_sign": "전일대비부호",  # 전일 대비 상승/하락/보합 부호
-                "prdy_ctrt": "전일 대비율",  # 전일 종가 대비 등락률(%)
-                "stck_hgpr": "주식 최고가",  # 당일 최고 가격
-                "stck_lwpr": "주식 최저가",  # 당일 최저 가격
-                "stck_mxpr": "주식 상한가",  # 상한가 제한 가격
-                "stck_llam": "주식 하한가",  # 하한가 제한 가격
-                "stck_sdpr": "주식 기준가",  # 기준 가격 (보통 전일 종가)
-                "d250_hgpr": "250일 최고가",  # 최근 250일 간 최고가
-                "d250_hgpr_date": "250일 최고가 일자",  # 250일 최고가 기록일
-                "d250_hgpr_vrss_prpr_rate": "250일 최고가 대비 현재가 비율",  # 현재가가 250일 최고가 대비 몇 %인지
-                "d250_lwpr": "250일 최저가",  # 최근 250일 간 최저가
-                "d250_lwpr_date": "250일 최저가 일자",  # 250일 최저가 기록일
-                "d250_lwpr_vrss_prpr_rate": "250일 최저가 대비 현재가 비율",  # 현재가가 250일 최저가 대비 몇 %인지
-            }
-            stock_info = {k: data.get(k) for k in fields_to_extract}
-            # 기존의 52주/250일 대비율 필드(혹시 추가 필드 필요시 아래처럼 유지)
-            stock_info["w52_hgpr_vrss_prpr_ctrt"] = data.get("w52_hgpr_vrss_prpr_ctrt")
-            stock_info["w52_lwpr_vrss_prpr_ctrt"] = data.get("w52_lwpr_vrss_prpr_ctrt")
-            return stock_info
-        elif t1 is None:
-            return dict()
-        else:
-            t1.print_error()
-            return dict()
+
+        data = self.get_and_parse_response(url, tr_id, params)
+        if not data:
+            return pd.DataFrame(), pd.DataFrame()
+
+        body = data.get_body()
+
+        # 각 output 필드를 안전하게 추출
+        output1 = getattr(body, "output1", [])
+        output2 = getattr(body, "output2", [])
+
+        # 데이터프레임 변환
+        df1 = pd.DataFrame(output1)
+        df2 = pd.DataFrame(output2)
+
+        df1 = self.map_and_order_columns(df1)
+        df2 = self.map_and_order_columns(df2)
+
+        return df1, df2
 
     def get_send_data(self, cmd=None, stock_code=None):
         # 1. 주식호가, 2.주식호가해제, 3.주식체결, 4.주식체결해제, 5.주식체결통보(고객), 6.주식체결통보해제(고객), 7.주식체결통보(모의), 8.주식체결통보해제(모의)
@@ -481,16 +537,16 @@ class KoreaInvestAPI:
         elif cmd == 4:  # 주식체결 등록해제
             tr_id = 'H0STCNT0'
             tr_type = '2'
-        elif cmd == 5:  # 주실체결통보 등록(고객용)
+        elif cmd == 5:  # 주식체결통보 등록(고객용)
             tr_id = 'H0STCNI0' #고객체결통보
             tr_type = '1'
-        elif cmd == 6:  # 주실체결통보 등록해제(고객용)
+        elif cmd == 6:  # 주식체결통보 등록해제(고객용)
             tr_id = 'H0STCNI0'  # 고객체결통보
             tr_type = '2'
-        elif cmd == 7:  # 주실체결통보 등록(모의)
+        elif cmd == 7:  # 주식체결통보 등록(모의)
             tr_id = 'H0STCNI9'  # 테스트용 직원체결통보
             tr_type = '1'
-        elif cmd == 8:  # 주실체결통보 등록해제(모의)
+        elif cmd == 8:  # 주식체결통보 등록해제(모의)
             tr_id = 'H0STCNI9'  # 테스트용 직원체결통보
             tr_type = '2'
 
@@ -515,277 +571,96 @@ class KoreaInvestAPI:
             )
         return senddata
 
-
-    def get_holdings_detailed(self):
-        url = "/uapi/domestic-stock/v1/trading/inquire-balance"
-        tr_id = "VTTC8434R" if self.is_paper_trading else "TTTC8434R"
-        params = {
-            "CANO": self.account_num[:8],
-            "ACNT_PRDT_CD": self.account_num[8:],
-            "AFHR_FLPR_YN": "N",
-            "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N",
-            "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "01",
-            "OFL_YN": "N",
-            "INQR_DVSN": "01",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": ""
-        }
-
-        response = self._url_fetch(url, tr_id, params)
-        if DEBUG: logger.debug(f"📦 holdings_detailed API 응답 전체: {response.get_response().text if response else '응답 없음'}")
-        if response is None or not response.is_ok():
-            if DEBUG: logger.warning("❌ API 호출 실패 또는 응답 오류")
-            return None
-
-        body = response.get_body()
-        output1 = pd.DataFrame(body.output1) if hasattr(body, "output1") else pd.DataFrame()
-
-        # Robust extraction of output2
-        output2 = {}
-        if hasattr(body, "output2") and isinstance(body.output2, list) and body.output2:
-            output2 = body.output2[0]
-        else:
-            if DEBUG: logger.warning("⚠️ output2 비어 있음 — 총자산 요약 불가")
-
-        summary = {
-            "예수금총금액": output2.get("dnca_tot_amt"),
-            "익일정산금액": output2.get("nxdy_excc_amt"),
-            "가수도정산금액": output2.get("prvs_rcdl_excc_amt"),
-            "총평가금액": output2.get("tot_evlu_amt"),
-            "자산증감액": output2.get("asst_icdc_amt"),
-            "금일매수수량": output2.get("thdt_buyqty"),
-            "금일매도수량": output2.get("thdt_sll_qty"),
-            "금일제비용금액": output2.get("thdt_tlex_amt")
-        }
-
-        if DEBUG: logger.debug(f"📊 output1 (보유 종목): {output1}")
-        if DEBUG: logger.debug(f"📈 summary (총자산 요약): {summary}")
-
-        # Check for empty holdings (output1)
-        if output1.empty:
-            if DEBUG: logger.debug("📭 보유 종목 없음: output1이 비어 있음")
-            return {
-                "stocks": [],
-                "summary": summary,
-                "is_empty": True
-            }
-
-        return {
-            "stocks": output1.to_dict(orient='records'),
-            "summary": summary,
-            "is_empty": False
-        }
-
-    def get_candle_data(self, stock_code):
-        from get_candle_data import get_candle_chart_data
-        return get_candle_chart_data(stock_code)
-
-
-    def get_total_asset(self):
-        url = "/uapi/domestic-stock/v1/trading/inquire-balance"
-        tr_id = "VTTC8434R" if self.is_paper_trading else "TTTC8434R"
-        params = {
-            "CANO": self.account_num[:8],
-            "ACNT_PRDT_CD": self.account_num[8:],
-            "AFHR_FLPR_YN": "N",
-            "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N",
-            "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "01",
-            "OFL_YN": "N",
-            "INQR_DVSN": "01",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": ""
-        }
-
-        response = self._url_fetch(url, tr_id, params)
-
-        if response and response.is_ok():
-            body = response.get_body()
-            try:
-                if hasattr(body, "output2") and body.output2:
-                    return int(body.output2[0]["tot_evlu_amt"])
-                else:
-                    return None
-            except Exception as e:
-                if DEBUG: logger.info(f"총자산 추출 오류: {e}")
-                return None
-
-    def refresh_access_token(self):
-        if DEBUG:
-            logger.info("🔁 토큰 갱신 시작")
-            logger.debug("🛠️ [refresh_access_token] 함수 진입 확인")
-
-        token_url = (self.cfg.get("paper_url") if self.is_paper_trading else self.cfg.get("url")).rstrip("/") + "/oauth2/tokenP"
-        api_key = self.cfg.get("paper_api_key") if self.is_paper_trading else self.cfg.get("api_key")
-        api_secret_key = self.cfg.get("paper_api_secret_key") if self.is_paper_trading else self.cfg.get("api_secret_key")
-
-        payload = {
-            "grant_type": "client_credentials",
-            "appkey": api_key,
-            "appsecret": api_secret_key
-        }
-
-        try:
-            response = requests.post(token_url, json=payload)
-            if response.status_code != 200:
-                raise Exception(f"토큰 갱신 실패: {response.status_code} {response.text}")
-
-            data = response.json()
-            new_token = "Bearer " + data.get("access_token", "")
-            if not new_token.strip():
-                raise Exception(f"토큰 갱신 실패: access_token 누락 - {data}")
-
-            self.access_token = new_token
-            self.token_issued_at = int(time.time())
-            self.base_headers["authorization"] = new_token
-
-            if self.is_paper_trading:
-                self.cfg["papertoken"] = new_token
-                self.cfg["papertoken_issued_at"] = self.token_issued_at
-            else:
-                self.cfg["realtoken"] = new_token
-                self.cfg["realtoken_issued_at"] = self.token_issued_at
-
-            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.cfg, f, ensure_ascii=False, indent=2)
-            if DEBUG:
-                logger.debug(f"✅ settings.json 저장 완료: {SETTINGS_FILE}")
-                logger.debug(f"🧾 저장된 cfg 내용: {json.dumps(self.cfg, ensure_ascii=False, indent=2)}")
-
-            # 다시 로드
-            try:
-                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                    self.cfg = json.load(f)
-                self.token_issued_at = (
-                    self.cfg.get("papertoken_issued_at") if self.is_paper_trading
-                    else self.cfg.get("realtoken_issued_at")
-                )
-                if DEBUG:
-                    logger.debug(f"🧾 다시 로드된 token_issued_at: {self.token_issued_at}")
-            except Exception as e:
-                logger.error(f"❌ settings.json 다시 로드 실패: {e}")
-
-            if DEBUG:
-                logger.info("✅ 토큰 갱신 완료")
-
-        except Exception as e:
-            logger.error(f"❌ 토큰 갱신 중 예외 발생: {e}")
-            raise
-
     def summarize_foreign_institution_estimates(self, stock_code):
+        # 종목별 외인기관 추정가집계
+        # 한국투자 MTS > 국내 현재가 > 투자자 > 투자자동향 탭 > 왼쪽구분을 '추정(주)'로 선택 시 확인 가능한 데이터
+        # 입력시간은 외국인 09:30, 11:20, 13:20, 14:30 / 기관종합 10:00, 11:20, 13:20, 14:30
         if self.is_paper_trading:
             logger.info("모의투자는 지원하지 않습니다.")
             return None
 
-        url = self.using_url + "/uapi/domestic-stock/v1/quotations/investor-trend-estimate"
+        url = self.request_base_url + "/uapi/domestic-stock/v1/quotations/investor-trend-estimate"
         tr_id = "HHPTJ04160200"
 
-        headers = {
-            "content-type": "application/json; charset=utf-8",
-            "authorization": self.cfg["realtoken"],
-            "appkey": self.cfg["api_key"],
-            "appsecret": self.cfg["api_secret_key"],
-            "tr_id": tr_id,
-            "custtype": "P",
-        }
         params = {
             "MKSC_SHRN_ISCD": stock_code
         }
 
-        response = requests.get(url, headers=headers, params=params)
+        data = self.get_and_parse_response(url, tr_id, params)
+        if not data:
+            return pd.DataFrame(), pd.DataFrame()
 
-        return response
+        body = data.get_body()
+        output2 = getattr(body, "output2", [])
+        # 데이터프레임 변환
+        df2 = pd.DataFrame(output2)
+        df2 = self.map_and_order_columns(df2)
 
+        return df2
 
-    def get_foreign_net_trading_summary(self, market):
+    def current_price_and_investor(self, stock_code):
+        # 주식현재가 투자자 | 개인, 외국인, 기관 등 투자 정보를 확인할 수 있습니다.
+        url = self.request_base_url + "/uapi/domestic-stock/v1/quotations/inquire-investor"
+        tr_id = "FHKST01010900" if self.is_paper_trading else "FHKST01010900"
+
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": stock_code
+        }
+
+        data = self.get_and_parse_response(url, tr_id, params)
+
+        if not data:
+            return pd.DataFrame(), pd.DataFrame()
+
+        body = data.get_body()
+        output = getattr(body, "output", [])
+        # 데이터프레임 변환
+        df = pd.DataFrame(output)
+        df = self.map_and_order_columns(df)
+
+        return df
+
+    def foreign_net_trading_summary(self, market):
         # 외국계 매매 종목 정보를 조회하는 함수
         # 종목별이 아니라, 각 시장의 상위 종목들을 일괄로 반환
-        if DEBUG:
-            logger.info("🔁 외국계 매매종목 가집계 시작")
         if self.is_paper_trading:
             logger.info("모의투자는 지원하지 않습니다.")
             return None
 
-        url = self.using_url + "/uapi/domestic-stock/v1/quotations/frgnmem-trade-estimate"
+        url = self.request_base_url + "/uapi/domestic-stock/v1/quotations/frgnmem-trade-estimate"
         tr_id = "FHKST644100C0"
-
-        headers = {
-            "content-type": "application/json; charset=utf-8",
-            "authorization": self.access_token,
-            "appkey": self.cfg["api_key"],
-            "appsecret": self.cfg["api_secret_key"],
-            "custtype": "P",
-            "tr_id": tr_id
-        }
-
-        # 📌 frgnmem-trade-estimate API 호출 파라미터 설명 (출처: 한국투자증권 OpenAPI 문서)
-        # - FID_COND_MRKT_DIV_CODE: 조건시장분류코드 ("J" = 코스피, "K" = 코스닥 등)
-        # - FID_COND_SCR_DIV_CODE: 조건화면분류코드 (일반적으로 빈 문자열)
-        # - FID_INPUT_ISCD: 입력종목코드 (예: "005930" = 삼성전자)
-        # - FID_RANK_SORT_CLS_CODE: 정렬 기준 1 ("0" = 기본, "1" = 금액순 등)
-        # - FID_RANK_SORT_CLS_CODE_2: 정렬 기준 2 ("0" = 기본, "1" = 매수순 등)
 
         params = {
             "FID_COND_MRKT_DIV_CODE": 'J',  # 조건시장분류코드
             "FID_COND_SCR_DIV_CODE": "16441",  # 조건화면분류코드
-            "FID_INPUT_ISCD": market,   # 입력종목코드
+            "FID_INPUT_ISCD": market,  # 입력종목코드
             "FID_RANK_SORT_CLS_CODE": "0",  # 금액순 정렬
-            "FID_RANK_SORT_CLS_CODE_2": "0" # 매수순 정렬
+            "FID_RANK_SORT_CLS_CODE_2": "0"  # 매수순 정렬
         }
 
-        response = requests.get(url, headers=headers, params=params)
+        data = self.get_and_parse_response(url, tr_id, params)
 
-        if DEBUG:
-            logger.debug(f"📄 응답 원문 (text):\n{response.text}")
-            logger.debug(f"🌐 HTTP 응답 코드: {response.status_code}")
-        try:
-            response_json = response.json()
-            if DEBUG:
-                logger.debug(f"📦 응답 JSON keys: {list(response_json.keys())}")
-            output = pd.DataFrame(response_json.get("output", []))
-        except Exception as e:
-            logger.warning(f"❌ 응답 JSON 파싱 실패: {e}")
-            output = pd.DataFrame()
+        if not data:
+            return pd.DataFrame(), pd.DataFrame()
 
-        # 주요 컬럼 정보 주석
-        # "stck_shrn_iscd" | 주식단축종목코드
-        # "hts_kor_isnm" | HTS한글종목명
-        # "orgn_fake_ntby_qty" | 기관순매수수량
-        # "glob_ntsl_qty" | 외국계순매도수량
-        # "stck_prpr" | 주식현재가
-        # "prdy_vrss" | 전일대비
-        # "prdy_vrss_sign" | 전일대비부호
-        # "prdy_ctrt" | 전일대비율
-        # "acml_vol" | 누적거래량
-        # "glob_total_seln_qty" | 외국계총매도수량
-        # "glob_total_shnu_qty" | 외국계총매수수량
+        body = data.get_body()
+        output = getattr(body, "output", [])
+        # 데이터프레임 변환
+        df = pd.DataFrame(output)
+        df = self.map_and_order_columns(df)
 
-        return output
+        return df
 
-    def get_program_trade_summary_by_time(self, stock_code, market):
+    def program_trade_summary_by_time(self, stock_code, market):
         # 프로그램매매 종합현황(시간)을 종목별로 검색 요청하는 함수
-        if DEBUG:
-            logger.info("🔁 프로그램매매 종합현황 시작")
+        # 없는 서비스 코드라는 답변이 나옴
         if self.is_paper_trading:
             logger.info("모의투자는 지원하지 않습니다.")
             return None
 
-        url = self.using_url + "/uapi/domestic-stock/v1/quotations/comp-program-trade-today"
+        url = self.request_base_url + "/uapi/domestic-stock/v1/quotations/comp-program-trade-today"
         tr_id = "HPPG04600101"
-
-        logger.info(url, tr_id)
-
-        headers = {
-            "content-type": "application/json; charset=utf-8",
-            "authorization": self.access_token,
-            "appkey": self.cfg["api_key"],
-            "appsecret": self.cfg["api_secret_key"],
-            "tr_id": tr_id,
-            "custtype": "P"
-        }
 
         params = {
             "FID_COND_MRKT_DIV_CODE": market,  # KRX : J , NXT : NX, 통합 : UN
@@ -793,46 +668,45 @@ class KoreaInvestAPI:
             "FID_INPUT_DATE_1": "",  # 입력 날짜1: 기준일 (ex 0020240308), 미입력시 당일부터 조회
         }
 
-        response = requests.get(url, headers=headers, params=params)
-        if DEBUG:
-            logger.debug(f"📄 응답 원문 (text):\n{response.text}")
-            logger.debug(f"🌐 HTTP 응답 코드: {response.status_code}")
-        try:
-            response_json = response.json()
-            if DEBUG:
-                logger.debug(f"📦 응답 JSON keys: {list(response_json.keys())}")
-            output = pd.DataFrame(response_json.get("output", []))
-        except Exception as e:
-            logger.warning(f"❌ 응답 JSON 파싱 실패: {e}")
-            output = pd.DataFrame()
+        data = self.get_and_parse_response(url, tr_id, params)
 
-        return output
+        if not data:
+            return pd.DataFrame(), pd.DataFrame()
+
+        body = data.get_body()
+        output = getattr(body, "output", [])
+        # 데이터프레임 변환
+        df = pd.DataFrame(output)
+        df = self.map_and_order_columns(df)
+
+        return df
 
     def summarize_foreign_net_estimates(self, stock_code):
+        # 종목별 외국계 순매수추이 | 한국투자 HTS(eFriend Plus) > [0433] 종목별 외국계 순매수추이 화면의 기능
         if self.is_paper_trading:
             logger.info("모의투자는 지원하지 않습니다.")
             return None
-        url = self.using_url + "/uapi/domestic-stock/v1/quotations/frgnmem-pchs-trend"
+        url = self.request_base_url + "/uapi/domestic-stock/v1/quotations/frgnmem-pchs-trend"
         tr_id = "FHKST644400C0"
 
-        headers = {
-            "content-type": "application/json",
-            "authorization": self.cfg["realtoken"],
-            "appkey": self.cfg["api_key"],
-            "appsecret": self.cfg["api_secret_key"],
-            "tr_id": tr_id,
-            "custtype": "P",
-        }
         params = {
             "FID_INPUT_ISCD": stock_code, # 종목코드(ex) 005930(삼성전자))
             "FID_INPUT_ISCD_2": "99999", # 조건화면분류코드 |외국계 전체(99999)
             "FID_COND_MRKT_DIV_CODE": "J" # J (KRX만 지원)
         }
 
-        response = requests.get(url, headers=headers, params=params)
+        data = self.get_and_parse_response(url, tr_id, params)
 
-        return response
+        if not data:
+            return pd.DataFrame(), pd.DataFrame()
 
+        body = data.get_body()
+        output = getattr(body, "output", [])
+        # 데이터프레임 변환
+        df = pd.DataFrame(output)
+        df = self.map_and_order_columns(df)
+
+        return df
 
 class APIResponse:
     def __init__(self, resp):
@@ -887,4 +761,3 @@ class APIResponse:
         if DEBUG: logger.info(f"Error in response: {self.get_result_code()}")
         if DEBUG: logger.info(f"{self.get_body().rt_cd}, {self.get_error_code()}, {self.get_error_message()}")
         if DEBUG: logger.info(f"---------------------------------")
-    # (Method removed: get_order_detail)

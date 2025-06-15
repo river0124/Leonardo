@@ -6,8 +6,7 @@ from tqdm import tqdm
 from loguru import logger
 import json
 import time
-from utils import KoreaInvestAPI, KoreaInvestEnv
-from settings import cfg
+from utils_backup import KoreaInvestAPI, KoreaInvestEnv
 
 # Load DEBUG setting
 with open(f"{CACHE_DIR}/settings.json") as f:

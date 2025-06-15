@@ -13,7 +13,7 @@ from FinanceDataReader import DataReader
 from typing import List
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from get_total_data_for_candidates import get_foreign_institution_trend,get_foreign_net_trend
-from utils import KoreaInvestAPI, KoreaInvestEnv
+from utils_backup import KoreaInvestAPI, KoreaInvestEnv
 from settings import cfg
 from slack_notifier import post_to_slack
 
@@ -83,8 +83,6 @@ def find_52week_high_candidates():
 
 
 # ✅ 섹터별 대장주 5개 중 최근 5일 간 상승 종목이 3개 이상인 섹터만 필터링
-
-import os
 
 stock_list_path = f"{CACHE_DIR}/stock_list_with_sectors.csv"
 

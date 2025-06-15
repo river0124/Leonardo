@@ -173,7 +173,7 @@ async def connect (korea_invest_api, url):
 
 if __name__ == "__main__":
     import yaml
-    from utils import KoreaInvestEnv, KoreaInvestAPI
+    from utils_backup import KoreaInvestEnv, KoreaInvestAPI
     with open("./config.yaml", encoding='UTF-8') as f:
         cfg = yaml.load(f, Loader=yaml.FullLoader)
     env_cls = KoreaInvestEnv(cfg)

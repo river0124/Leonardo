@@ -14,7 +14,7 @@ from settings import cfg
 from get_asset import get_total_asset
 from get_candle_data import get_candle_chart_data
 from watchlist_store import load_watchlist, add_code_to_watchlist, remove_code_from_watchlist
-from utils import KoreaInvestEnv, KoreaInvestAPI
+from utils_backup import KoreaInvestEnv, KoreaInvestAPI
 from stock_name_finder import get_stock_name_by_code
 from trade_manager import TradeManager
 from settings import load_settings, save_settings
@@ -336,7 +336,7 @@ def holdings_detail():
 @app.route("/holdings")
 def get_holdings():
     try:
-        from utils import create_env_api  # ensure this import exists at the top if not already
+        from utils_backup import create_env_api  # ensure this import exists at the top if not already
         env, api = create_env_api()  # Re-initialize per request
         result = api.get_holdings_detailed()
         if result is None or "stocks" not in result:
